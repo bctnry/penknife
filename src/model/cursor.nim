@@ -9,8 +9,9 @@ type
     # this column.
     expectingX*: cint
 
+proc mkNewCursor*(x: cint = 0, y: cint = 0): Cursor = Cursor(x: x, y: y)
+
 # NOTE: we don't check `expectingX` here since it's only for ergonomic cursor movements.
-    
 proc `<`*(x: Cursor, y: Cursor): bool =
   if x.y < y.y: return true
   elif x.y > y.y: return false

@@ -5,10 +5,8 @@ import sdl2
 import sdl2/ttf
 import model/[textbuffer, state, cursor]
 import ui/[font, texture, timer, sdl2_utils]
+import component/[titlebar, linenumberpanel, statusline, cursorview, editorview]
 import config
-
-proc clip(x: cint, l: cint, r: cint): cint =
-  return (if x < l: l elif x > r: r else: x)
 
 const SCREEN_WIDTH: cint = 1280.cint
 const SCREEN_HEIGHT: cint = 768.cint
@@ -117,17 +115,13 @@ proc main(): int =
 
   # setup textbuffer
   if paramCount() <= 0:
-    globalState.session = "".fromString
-    globalState.session.name = "*unnamed*"
-    globalState.session.fullPath = ""
+    globalState.loadText("")
   else:
     let fn = paramStr(1)
     let f = open(fn, fmRead)
     let s = f.readAll()
     f.close()
-    globalState.session = s.fromString
-    globalState.session.name = fn.Path.extractFilename.string
-    globalState.session.fullPath = fn.Path.absolutePath.string
+    globalState.loadText(s, name=fn.Path.extractFilename.string, fullPath=fn.Path.absolutePath.string)
   var session = globalState.session
 
   # setup grid
@@ -152,6 +146,12 @@ proc main(): int =
   window.getSize(w, h)
   globalState.relayout(w, h)
 
+  var titlebar = mkTitleBar(globalState, dstrect.addr)
+  var lineNumberPanel = mkLineNumberPanel(globalState, dstrect.addr)
+  var statusLine = mkStatusLine(globalState, dstrect.addr)
+  var cursorView = mkCursorView(globalState, dstrect.addr)
+  var editorView = mkEditorView(globalState)
+
   let backgroundColor = globalState.bgColor
   let foregroundColor = globalState.fgColor
   
@@ -163,30 +163,7 @@ proc main(): int =
   var cursorColor: int = 1
   var cursorBlinkTimer = mkInterval((
     proc (): void =
-      let cursorRelativeX = globalState.cursor.x - globalState.viewPort.x
-      let cursorRelativeY = globalState.cursor.y - globalState.viewPort.y
-      if cursorRelativeX >= 0 and cursorRelativeY < globalState.viewPort.w:
-        let baselineX = (globalState.viewPort.offset*gridSize.w).cint
-        let offsetPY = (globalState.viewPort.offsetY*gridSize.h).cint
-        let bgcolor = if cursorColor == 0: backgroundColor else: foregroundColor
-        let fgcolor = if cursorColor == 0: foregroundColor else: backgroundColor
-        let cursorPX = baselineX+cursorRelativeX*globalState.gridSize.w
-        let cursorPY = offsetPY+cursorRelativeY*gridSize.h
-        renderer.setDrawColor(bgcolor.r, bgcolor.g, bgcolor.b)
-        dstrect.x = cursorPX
-        dstrect.y = cursorPY
-        dstrect.w = gridSize.w
-        dstrect.h = gridSize.h
-        renderer.fillRect(dstrect.addr)
-        if globalState.cursor.y < globalState.session.lineCount() and
-           globalState.cursor.x < globalState.session.getLineLength(globalState.cursor.y):
-          var s = ""
-          s.add(globalState.session.getLine(globalState.cursor.y)[globalState.cursor.x])
-          discard renderer.renderTextSolid(
-            globalState.globalFont, s.cstring, cursorPX, cursorPY, fgcolor
-          )
-        renderer.present()
-        cursorColor = 1 - cursorColor
+      cursorView.renderWith(renderer)
   ), 500)
   cursorBlinkTimer.start()
   
@@ -295,22 +272,23 @@ proc main(): int =
             selectionInitiated = false
             
         of sdl2.MouseMotion:
-          if not (event.motion.xrel == 0 and event.motion.yrel == 0):
-            if (event.motion.state and 1).bool:
-              let y = max(0, min(globalState.convertMousePositionY(event.motion.y), globalState.session.lineCount()))
-              var x = (
-                if y == globalState.session.lineCount():
-                  0
-                else:
-                  max(0, min(globalState.session.getLineLength(y), globalState.convertMousePositionX(event.motion.x)))
-              )
-              if selectionInitiated:
-                globalState.selectionInEffect = true
-                globalState.setSelectionLastPoint(x, y)
-                globalState.cursor.x = x.cint
-                globalState.cursor.y = y.cint
-                globalState.syncViewPort()
-              shouldRefresh = true
+          if sdl2.getModState() == KMOD_NONE:
+            if not (event.motion.xrel == 0 and event.motion.yrel == 0):
+              if (event.motion.state and 1).bool:
+                let y = max(0, min(globalState.convertMousePositionY(event.motion.y), globalState.session.lineCount()))
+                var x = (
+                  if y == globalState.session.lineCount():
+                    0
+                  else:
+                    max(0, min(globalState.session.getLineLength(y), globalState.convertMousePositionX(event.motion.x)))
+                )
+                if selectionInitiated:
+                  globalState.selectionInEffect = true
+                  globalState.setSelectionLastPoint(x, y)
+                  globalState.cursor.x = x.cint
+                  globalState.cursor.y = y.cint
+                  globalState.syncViewPort()
+                shouldRefresh = true
             
         of sdl2.KeyDown:
           let modState = sdl2.getModState()
@@ -419,7 +397,7 @@ proc main(): int =
                   shouldRefresh = true
               else:
                 if globalState.selectionInEffect:
-                  globalState.invalidatezSelection()
+                  globalState.invalidateSelection()
                   shouldRefresh = true
                 globalState.cursorUp(globalState.session)
 
@@ -638,207 +616,15 @@ proc main(): int =
     let selectionRangeEnd = max(globalState.selection.first, globalState.selection.last)
     
     # render line number
-    for i in globalState.viewPort.y..<renderRowBound:
+    lineNumberPanel.renderWith(renderer)
 
-      let lnStr = ($i).cstring
-      let lnColor = if globalState.cursor.y == i: backgroundColor else: foregroundColor
-      let lnTexture = renderer.mkTextTexture(globalState.globalFont, lnStr, lnColor)
-      if globalState.cursor.y == i:
-        dstrect.x = 0
-        dstrect.y = offsetPY + ((i-globalState.viewPort.y)*gridSize.h).cint
-        dstrect.w = baselineX-(VIEWPORT_GAP-1)*gridSize.w
-        dstrect.h = gridSize.h
-        renderer.setDrawColor(foregroundColor.r, foregroundColor.g, foregroundColor.b)
-        renderer.fillRect(dstrect.addr)
-      dstrect.x = (globalState.viewPort.offset-VIEWPORT_GAP)*gridSize.w-lnTexture.w
-      dstrect.y = offsetPY + ((i-globalState.viewPort.y)*gridSize.h).cint
-      dstrect.w = lnTexture.w
-      dstrect.h = lnTexture.h
-      renderer.copyEx(lnTexture.raw, nil, dstrect.addr, 0.cdouble, nil)
-
-    # render selection marker
-    if displaySelectionRangeIndicator and globalState.selectionInEffect:
-      for i in globalState.viewPort.y..<renderRowBound:
-        if (selectionRangeStart.y <= i and i <= selectionRangeEnd.y):
-          dstrect.y = offsetPY + ((i-globalState.viewPort.y)*gridSize.h).cint
-          discard renderer.renderTextSolid(
-            globalState.globalFont, (if i == selectionRangeStart.y:
-                     "{"
-                   elif i == selectionRangeEnd.y:
-                     "}"
-                   else:
-                     "|").cstring,
-              baselineX-VIEWPORT_GAP*gridSize.w, dstrect.y,
-              (if globalState.cursor.y == i: backgroundColor else: foregroundColor)
-            )
-            
-    # render line.    
-    for i in globalState.viewPort.y..<renderRowBound:
-      let line = globalState.session.getLine(i)
-      # if globalState.viewPort.x > line.len: continue
-      let renderColBound = min(globalState.viewPort.x+globalState.viewPort.w, line.len)
-      if renderColBound <= globalState.viewPort.x:
-        # when: (1) selection is active; (2) row is in selection; (3) row is
-        # empty after clipping, we need to display an indicator in the form
-        # of a rectangle the size of a single character. this is the behaviour
-        # of emacs. we now do the same thing here.
-        if globalState.selectionInEffect and selectionRangeStart.y < i and i < selectionRangeEnd.y:
-          dstrect.x = baselineX.cint
-          dstrect.y = offsetPY + ((i-globalState.viewPort.y)*gridSize.h).cint
-          dstrect.w = globalState.gridSize.w
-          dstrect.h = globalState.gridSize.h
-          renderer.setDrawColor(foregroundColor.r, foregroundColor.g, foregroundColor.b)
-          renderer.fillRect(dstrect.addr)
-        continue
-      let clippedLine = line[globalState.viewPort.x..<renderColBound]
-      let clippedLineLen = renderColBound - globalState.viewPort.x
-      # Note that we render selection range in invert color.
-      # the beginning and the ending lines of selection range needs special
-      # treatment (since we can have the selection starts or ends in the middle
-      # of a line) but the lines in between can be safely rendered in invert
-      # color as a whole.
-      # we calculate the position of cursor & render it separately later.
-      # since we've sorted the selection range endpoints using min and max above
-      # we can safely render the rightPart of the line at selectionRangeStart and
-      # the leftPart of the line line at selectionRangeEnd in invert color.
-
-      # if we have selection we render special lines separately.
-      if globalState.selectionInEffect:
-        # when the selection is within a single line
-        if selectionRangeStart.y == selectionRangeEnd.y and i == selectionRangeStart.y:
-          let splittingPoint1 = (selectionRangeStart.x - globalState.viewPort.x).clip(0, clippedLineLen.cint)
-          let splittingPoint2 = (selectionRangeEnd.x - globalState.viewPort.x).clip(0, clippedLineLen.cint)
-          var leftPartTexture = renderer.mkTextTexture(
-            globalState.globalFont, clippedLine[0..<splittingPoint1].cstring, foregroundColor
-          )
-          var middlePartTexture = renderer.mkTextTexture(
-            globalState.globalFont, clippedLine[splittingPoint1..<splittingPoint2].cstring, backgroundColor
-          )
-          var rightPartTexture = renderer.mkTextTexture(
-            globalState.globalFont, clippedLine.substr(splittingPoint2).cstring, foregroundColor
-          )
-          dstrect.y = offsetPY + ((i-globalState.viewPort.y+1)*gridSize.h - max(max(leftPartTexture.height, rightPartTexture.height), gridSize.h)).cint
-          if not leftPartTexture.isNil:
-            dstrect.x = baselineX
-            dstrect.w = leftPartTexture.w
-            dstrect.h = leftPartTexture.h
-            renderer.copyEx(leftPartTexture.raw, nil, dstrect.addr, 0.cdouble, nil)
-          if not middlePartTexture.isNil:
-            dstrect.x = (baselineX+leftPartTexture.width).cint
-            dstrect.w = middlePartTexture.width.cint
-            dstrect.h = gridSize.h
-            renderer.setDrawColor(foregroundColor.r, foregroundColor.g, foregroundColor.b)
-            dstrect.h = middlePartTexture.height.cint
-            renderer.fillRect(dstrect.addr)
-            renderer.copyEx(middlePartTexture.raw, nil, dstrect.addr, 0.cdouble, nil)
-          if not rightPartTexture.isNil:
-            dstrect.x = (baselineX+leftPartTexture.width+middlePartTexture.width).cint
-            dstrect.w = rightPartTexture.width.cint
-            dstrect.h = rightPartTexture.height.cint
-            renderer.copyEx(rightPartTexture.raw, nil, dstrect.addr, 0.cdouble, nil)
-          leftPartTexture.dispose()
-          middlePartTexture.dispose()
-          rightPartTexture.dispose()
-        # when the line is the first line or the last line of a multiline selection.
-        elif selectionRangeStart.y == i or i == selectionRangeEnd.y and clippedLine.len > 0:
-          let splittingPoint = if i == selectionRangeStart.y: selectionRangeStart.x else: selectionRangeEnd.x
-          # NOTE THAT the splitting point wouldn't always be in the clipped range.
-          # we treat it the same as if the endpoints are at the start/end of the line.
-          # since some nim builtin doesn't handle out-of-range values so we do the
-          # tedious part here.
-          let splittingPointRelativeX = (splittingPoint-globalState.viewPort.x).clip(0, clippedLineLen.cint)
-          let leftPart = clippedLine[0..<splittingPointRelativeX].cstring
-          let rightPart = clippedLine.substr(splittingPointRelativeX).cstring
-          let baselineY = (i-globalState.viewPort.y+1)*gridSize.h
-          var leftPartTexture = renderer.mkTextTexture(
-            globalState.globalFont, leftPart, if i == selectionRangeStart.y: foregroundColor else: backgroundColor
-          )
-          var leftPartTextureWidth = if leftPartTexture.isNil: 0 else: leftPartTexture.w
-          var rightPartTexture = renderer.mkTextTexture(
-            globalState.globalFont, rightPart, if i == selectionRangeStart.y: backgroundColor else: foregroundColor
-          )
-          var rightPartTextureWidth = if rightPartTexture.isNil: 0 else: rightPartTexture.w
-          # draw inverted background.
-          # NOTE THAT baselineY is the *bottom* of the current line.
-          dstrect.x = (if i == selectionRangeStart.y: leftPartTextureWidth else: 0).cint + baselineX
-          dstrect.y = offsetPY + (baselineY-gridSize.h).cint
-          dstrect.w = (if i == selectionRangeStart.y: rightPartTextureWidth else: leftPartTextureWidth).cint
-          dstrect.h = gridSize.h
-          renderer.setDrawColor(foregroundColor.r, foregroundColor.g, foregroundColor.b)
-          renderer.fillRect(dstrect.addr)
-          # draw the parts.
-          if not leftPartTexture.isNil:
-            dstrect.x = baselineX
-            dstrect.w = leftPartTextureWidth.cint
-            renderer.copyEx(leftPartTexture.raw, nil, dstrect.addr, 0.cdouble, nil)
-          if not rightPartTexture.isNil:
-            dstrect.x = baselineX + leftPartTextureWidth.cint
-            dstrect.w = rightPartTextureWidth.cint
-            renderer.copyEx(rightPartTexture.raw, nil, dstrect.addr, 0.cdouble, nil)
-          leftPartTexture.dispose()
-          rightPartTexture.dispose()
-        elif selectionRangeStart.y < i and i < selectionRangeEnd.y:
-          let texture = renderer.mkTextTexture(
-            globalState.globalFont, clippedLine.cstring, backgroundColor
-          )
-          dstrect.x = baselineX
-          dstrect.y = offsetPY + ((i-globalState.viewPort.y)*gridSize.h).cint
-          dstrect.w = if texture.isNil: globalState.gridSize.w else: texture.w
-          dstrect.h = globalState.gridSize.h
-          renderer.setDrawColor(foregroundColor.r, foregroundColor.g, foregroundColor.b)
-          renderer.fillRect(dstrect.addr)
-          if not texture.isNil:
-            renderer.copyEx(texture.raw, nil, dstrect.addr, 0.cdouble, nil)
-            texture.dispose()
-
-      if not globalState.selectionInEffect or
-         i < selectionRangeStart.y or
-         i > selectionRangeEnd.y:
-        if renderer.renderTextSolid(
-          globalState.globalFont, clippedLine.cstring,
-          baselineX, offsetPY+((i-globalState.viewPort.y)*gridSize.h).cint,
-          foregroundColor
-        ) == -1: continue
-
+    # render line.
+    editorView.renderWith(renderer)
+    
     # draw cursor.
     if cursorBlinkTimer.paused or cursorBlinkTimer.stopped:
-      let cursorRelativeX = globalState.cursor.x - globalState.viewPort.x
-      let cursorRelativeY = globalState.cursor.y - globalState.viewPort.y
-      if cursorRelativeX >= 0 and cursorRelativeY < globalState.viewPort.w:
-        let bgcolor = (
-          if globalState.selectionInEffect and
-             between(cursorRelativeX, cursorRelativeY,
-                     selectionRangeStart, selectionRangeEnd):
-            backgroundColor
-          else:
-            foregroundColor
-        )
-        let fgcolor = (
-          if globalState.selectionInEffect and
-             between(cursorRelativeX, cursorRelativeY,
-                     selectionRangeStart, selectionRangeEnd):
-            foregroundColor
-          else:
-            backgroundColor
-        )
-        let cursorPX = baselineX+cursorRelativeX*globalState.gridSize.w
-        let cursorPY = offsetPY+cursorRelativeY*gridSize.h
-        renderer.setDrawColor(bgcolor.r, bgcolor.g, bgcolor.b)
-        dstrect.x = cursorPX
-        dstrect.y = cursorPY
-        dstrect.w = gridSize.w
-        dstrect.h = gridSize.h
-        renderer.fillRect(dstrect.addr)
-        if globalState.cursor.y < globalState.session.lineCount() and
-           globalState.cursor.x < globalState.session.getLineLength(globalState.cursor.y):
-          var s = ""
-          s.add(globalState.session.getLine(globalState.cursor.y)[globalState.cursor.x])
-          discard renderer.renderTextSolid(
-            globalState.globalFont, s.cstring, cursorPX, cursorPY, fgcolor
-          )
-      # update IME box position
-      sdl2.setTextInputRect(dstrect.addr)
-          
+      renderer.render(cursorView, flat=true)
+    
     # if the current viewport is at a position that can show the end-of-file indicator
     # we display that as well.
     if renderRowBound >= session.lineCount():
@@ -849,41 +635,10 @@ proc main(): int =
       )
 
     # render title bar
-    dstrect.x = 0
-    dstrect.y = 0
-    dstrect.w = globalState.viewPort.fullGridW*gridSize.w
-    dstrect.h = TITLE_BAR_HEIGHT*gridSize.h
-    renderer.setDrawColor(foregroundColor.r, foregroundColor.g, foregroundColor.b)
-    renderer.fillRect(dstrect.addr)
-    var titleBarStr = ""
-    titleBarStr &= (if globalState.session.isDirty: "[*] " else: "    ")
-    titleBarStr &= globalState.session.name
-    titleBarStr &= " | "
-    titleBarStr &= globalState.session.fullPath
-    discard renderer.renderTextSolid(
-      globalState.globalFont, titleBarStr.cstring,
-      0, 0,
-      backgroundColor
-    )
+    titlebar.renderWith(renderer)
     
     # render status line
-    dstrect.x = 0
-    dstrect.y = offsetPY+(globalState.viewPort.h*gridSize.h).cint
-    dstrect.w = globalState.viewPort.fullGridW*gridSize.w
-    dstrect.h = gridSize.h
-    renderer.setDrawColor(foregroundColor.r, foregroundColor.g, foregroundColor.b)
-    renderer.fillRect(dstrect.addr)
-    let cursorLocationStr = (
-      if globalState.selectionInEffect:
-         &"({globalState.selection.first.y+1},{globalState.selection.first.x+1})-({globalState.selection.last.y+1},{globalState.selection.last.x+1})"
-      else:
-         &"({globalState.cursor.y+1},{globalState.cursor.x+1})"
-    )
-    discard renderer.renderTextSolid(
-      globalState.globalFont, cursorLocationStr.cstring,
-      0, offsetPY+(globalState.viewPort.h * gridSize.h).cint,
-      backgroundColor
-    )
+    statusLine.renderWith(renderer)
 
     # render minibuffer
     if globalState.minibufferText.len > 0:
@@ -893,7 +648,7 @@ proc main(): int =
         foregroundColor
       )
       globalState.minibufferText = ""
-    
+
     renderer.present()
   
   renderer.destroy()

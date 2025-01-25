@@ -1,4 +1,7 @@
-from sdl2 import color, Color
+import sdl2
+from sdl2/ttf import renderUtf8Blended
+from font import TVFont
+from texture import LTexture, dispose
 
 proc fromHexDigit(x: char): int {.inline.} =
   if 'a' <= x and x <= 'f': return (x.ord - 'a'.ord + 10)
@@ -21,4 +24,36 @@ proc loadColorFromString*(c: var Color, x: string): void =
   c.b = (x[5].fromHexDigit * 16 + x[6].fromHexDigit).uint8
   c.a = 0
   return
+
+proc mkTextTexture*(renderer: RendererPtr, gfont: TVFont, str: cstring, color: sdl2.Color): LTexture =
+  if str.len == 0: return nil
+  let surface = gfont.raw.renderUtf8Blended(str, color)
+  if surface.isNil: return nil
+  let w = surface.w
+  let h = surface.h
+  let texture = renderer.createTextureFromSurface(surface)
+  if texture.isNil:
+    surface.freeSurface()
+    return nil
+  surface.freeSurface()
+  return LTexture(raw: texture, w: w, h: h)
   
+proc renderTextSolid*(renderer: RendererPtr, dstrect: ptr Rect,
+                      gfont: TVFont,
+                      str: cstring,
+                      x: cint, y: cint,
+                      color: sdl2.Color): cint =
+    # if str is empty surface would be nil, so we have to
+    # do it here to separate it from the case where there's
+    # a surface creation error.
+    if str.len == 0: return 0
+    let texture = renderer.mkTextTexture(gfont, str, color)
+    let w = texture.w
+    dstrect.x = x
+    dstrect.y = y
+    dstrect.w = texture.w
+    dstrect.h = texture.h
+    renderer.copyEx(texture.raw, nil, dstrect, 0.cdouble, nil)
+    texture.dispose()
+    return w
+    

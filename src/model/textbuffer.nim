@@ -1,5 +1,4 @@
 import std/[strutils, unicode, sequtils]
-import std/paths
 import cursor
 
 type
@@ -35,7 +34,7 @@ proc getLineLength*(tb: TextBuffer, l: int): int =
 proc isDirty*(tb: TextBuffer): bool =
   return tb.dirty
 
-proc resetDirtyState*(tb: var TextBuffer): void =
+proc resetDirtyState*(tb: TextBuffer): void =
   tb.dirty = false
 
 proc getName*(tb: TextBuffer): string =
@@ -43,7 +42,7 @@ proc getName*(tb: TextBuffer): string =
   
 proc resolvePosition*(tb: TextBuffer, line: int, col: int): tuple[line: int, col: int]
 
-proc insert*(tb: var TextBuffer, l: int, c: int, ch: char): tuple[dline: int, dcol: int] =
+proc insert*(tb: TextBuffer, l: int, c: int, ch: char): tuple[dline: int, dcol: int] =
   tb.dirty = true
   let (line, col) = tb.resolvePosition(l, c)
   if ch == '\n':
@@ -67,7 +66,7 @@ proc insert*(tb: var TextBuffer, l: int, c: int, ch: char): tuple[dline: int, dc
     tb.lineList[line].insert(ch.Rune, col)
     return (dline: 0, dcol: 1)
 
-proc insert*(tb: var TextBuffer, l: int, c: int, s: string): tuple[dline: int, dcol: int] =
+proc insert*(tb: TextBuffer, l: int, c: int, s: string): tuple[dline: int, dcol: int] =
   tb.dirty = true
   let (line, col) = tb.resolvePosition(l, c)
   if line >= tb.lineCount():
@@ -164,7 +163,7 @@ proc clip*(tb: TextBuffer, c: Cursor): tuple[line: int, col: int] =
 # equivalent to deleting from the previous char. This is written this
 # way because we implement TextBuffer as a sequence of texts with with 
 # backspacing and deleting has different edge cases.
-proc backspaceChar*(tb: var TextBuffer, l: int, c: int): void =
+proc backspaceChar*(tb: TextBuffer, l: int, c: int): void =
   tb.dirty = true
   var (line, col) = tb.resolvePosition(l, c)
   if line == 0 and col == 0: return
@@ -178,7 +177,7 @@ proc backspaceChar*(tb: var TextBuffer, l: int, c: int): void =
   else:
     tb.lineList[line] = ltext[0..<col-1] & ltext[col..<ltext.len]
 
-proc deleteChar*(tb: var TextBuffer, l: int, c: int): void =
+proc deleteChar*(tb: TextBuffer, l: int, c: int): void =
   tb.dirty = true
   let (line, col) = tb.resolvePosition(l, c)
   if line > tb.lineCount(): return
@@ -191,7 +190,7 @@ proc deleteChar*(tb: var TextBuffer, l: int, c: int): void =
   else:
     tb.lineList[line] = ltext[0..<col] & ltext[col+1..<ltext.len]
   
-proc delete*(tb: var TextBuffer, start: Cursor, last: Cursor): void =
+proc delete*(tb: TextBuffer, start: Cursor, last: Cursor): void =
   tb.dirty = true
   let (startLine, startCol) = tb.resolvePosition(start)
   let (lastLine, lastCol) = tb.resolvePosition(last)

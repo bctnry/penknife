@@ -4,6 +4,7 @@ import textbuffer
 import cursor
 import selection
 import keyseq
+import editsession
 import ../ui/font
 
 proc digitCount(x: int): int =
@@ -42,14 +43,9 @@ type
     w*: cint
     h*: cint
   State* = ref object
-    cursor*: Cursor
     viewport*: ViewPort
+    currentEditSession*: EditSession
     gridSize*: GridSizeDescriptor
-    session*: TextBuffer
-    # NOTE: selection remains non-nil at all time to (try to) prevent frequent
-    # small object allcation.
-    selection*: LinearSelection
-    selectionInEffect*: bool
     globalFont*: TVFont
     fgColor*: sdl2.Color
     bgColor*: sdl2.Color
@@ -62,21 +58,22 @@ type
     minibufferInputValue*: seq[Rune]
     fkeyMap*: FKeyMap
 
-proc mkNewCursor*(x: cint = 0, y: cint = 0): Cursor = Cursor(x: x, y: y)
+proc session*(st: State): TextBuffer = st.currentEditSession.textBuffer
+proc cursor*(st: State): Cursor = st.currentEditSession.cursor
+proc selection*(st: State): LinearSelection = st.currentEditSession.selection
+proc selectionInEffect*(st: State): bool = st.currentEditSession.selectionInEffect
+proc `selectionInEffect=`*(st: var State, nv: bool): void =
+  st.currentEditSession.selectionInEffect = nv
+    
 proc mkNewViewPort*(x: cint = 0, y: cint = 0, w: cint = 0, h: cint = 0,
                                                         offset: cint = 0, fullGridW: cint = 0, fullGridH: cint = 0, offsetY: cint = 0): ViewPort =
     ViewPort(x: x, y: y, w: w, h: h,
              offset: offset, offsetY: offsetY,
              fullGridW: fullGridW, fullGridH: fullGridH)
 proc mkNewState*(): State =
-  State(cursor: mkNewCursor(), viewport: mkNewViewPort(),
+  State(viewport: mkNewViewPort(),
+        currentEditSession: mkEditSession(),
         gridSize: GridSizeDescriptor(w: 0, h: 0),
-        session: "".fromString,
-        selection: LinearSelection(
-          first: Cursor(x: 0, y: 0, expectingX: 0),
-          last: Cursor(x: 0, y: 0, expectingX: 0)
-        ),
-        selectionInEffect: false,
         globalFont: TVFont(raw: nil, w: 0, h: 0),
         fgColor: sdl2.color(0, 0, 0, 0),
         bgColor: sdl2.color(0, 0, 0, 0),
@@ -87,8 +84,10 @@ proc mkNewState*(): State =
         fkeyMap: mkFKeyMap()
   )
 
-proc loadText*(st: var State, s: string): void =
-  st.session = s.fromString
+proc loadText*(st: var State, s: string, name: string = "*unnamed*", fullPath: string = ""): void =
+  st.currentEditSession.textBuffer = s.fromString
+  st.currentEditSession.textBuffer.name = name
+  st.currentEditSession.textBuffer.fullPath = fullPath
                               
 proc relayout*(st: var State): void
 proc syncViewPort*(st: var State): void =
