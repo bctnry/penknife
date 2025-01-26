@@ -13,7 +13,7 @@ import ../ui/[font, sdl2_utils, texture]
 type
   TitleBar* = ref object
     parentState*: State
-    dstrect*: ptr Rect
+    dstrect*: Rect
     lateral: tuple[
       dirty: bool,
       name: string,
@@ -24,10 +24,10 @@ type
       font: TVFont
     ]
 
-proc mkTitleBar*(st: State, dstrect: ptr Rect): TitleBar =
+proc mkTitleBar*(st: State): TitleBar =
   return TitleBar(
     parentState: st,
-    dstrect: dstrect,
+    dstrect: (x: 0, y: 0, w: 0, h: 0),
     lateral: (
       dirty: st.session.isDirty,
       name: st.session.name,
@@ -75,7 +75,7 @@ proc render*(renderer: RendererPtr, tb: TitleBar): void =
   )
   renderer.fillRect(tb.dstrect)
   var titleBarStr = ""
-  titleBarStr &= (if tb.lateral.dirty: "[*] " else: "    ")
+  titleBarStr &= (if tb.lateral.dirty: "[*] " else: "[ ] ")
   titleBarStr &= tb.lateral.name
   titleBarStr &= " | "
   titleBarStr &= tb.lateral.fullPath
@@ -84,8 +84,9 @@ proc render*(renderer: RendererPtr, tb: TitleBar): void =
     tb.lateral.font, titleBarStr.cstring, tb.parentState.bgColor
   )
   tb.dstrect.w = texture.w
-  renderer.copyEx(texture.raw, nil, tb.dstrect, 0.cdouble, nil)
+  renderer.copyEx(texture.raw, nil, tb.dstrect.addr, 0.cdouble, nil)
   texture.dispose()
   
 proc renderWith*(tb: TitleBar, renderer: RendererPtr): void =
   renderer.render(tb)
+  

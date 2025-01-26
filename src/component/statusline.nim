@@ -8,10 +8,13 @@ import ../ui/[sdl2_utils]
 type
   StatusLine* = ref object
     parentState*: State
-    dstrect*: ptr Rect
+    dstrect*: Rect
 
-proc mkStatusLine*(st: State, dstrect: ptr Rect): StatusLine =
-  return StatusLine(parentState: st, dstrect: dstrect)
+proc mkStatusLine*(st: State): StatusLine =
+  return StatusLine(
+    parentState: st,
+    dstrect: (x: 0, y: 0, w: 0, h: 0)
+  )
 
 proc render*(renderer: RendererPtr, tb: StatusLine): void =
   let st = tb.parentState
@@ -28,7 +31,7 @@ proc render*(renderer: RendererPtr, tb: StatusLine): void =
        &"({st.cursor.y+1},{st.cursor.x+1})"
   )
   discard renderer.renderTextSolid(
-    tb.dstrect, st.globalFont, cursorLocationStr.cstring,
+    tb.dstrect.addr, st.globalFont, cursorLocationStr.cstring,
     0, ((st.viewPort.offsetY+st.viewPort.h) * st.gridSize.h).cint,
     st.bgColor
   )

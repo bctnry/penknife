@@ -10,10 +10,13 @@ import ../ui/[sdl2_utils, texture]
 type
   LineNumberPanel* = ref object
     parentState*: State
-    dstrect*: ptr Rect
+    dstrect*: Rect
 
-proc mkLineNumberPanel*(st: State, dstrect: ptr Rect): LineNumberPanel =
-  return LineNumberPanel(parentState: st, dstrect: dstrect)
+proc mkLineNumberPanel*(st: State): LineNumberPanel =
+  return LineNumberPanel(
+    parentState: st,
+    dstrect: (x: 0, y: 0, w: 0, h: 0)
+  )
   
 proc render*(renderer: RendererPtr, lnp: LineNumberPanel): void =
   let st = lnp.parentState
@@ -36,7 +39,7 @@ proc render*(renderer: RendererPtr, lnp: LineNumberPanel): void =
     lnp.dstrect.y = offsetPY + ((i-st.viewPort.y)*st.gridSize.h).cint
     lnp.dstrect.w = lnTexture.w
     lnp.dstrect.h = lnTexture.h
-    renderer.copyEx(lnTexture.raw, nil, lnp.dstrect, 0.cdouble, nil)
+    renderer.copyEx(lnTexture.raw, nil, lnp.dstrect.addr, 0.cdouble, nil)
     
     # render selection marker
   if st.selectionInEffect:
@@ -47,7 +50,7 @@ proc render*(renderer: RendererPtr, lnp: LineNumberPanel): void =
         lnp.dstrect.y = offsetPY + ((i-st.viewPort.y)*st.gridSize.h).cint
         let indicator = if i == selectionRangeStart.y: "{" elif i == selectionRangeEnd.y: "}" else: "|"
         discard renderer.renderTextSolid(
-          lnp.dstrect, st.globalFont, indicator.cstring,
+          lnp.dstrect.addr, st.globalFont, indicator.cstring,
           baselineX-VIEWPORT_GAP*st.gridSize.w, lnp.dstrect.y,
           (if st.cursor.y == i: st.bgColor else: st.fgColor)
         )

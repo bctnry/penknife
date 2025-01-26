@@ -12,7 +12,7 @@ type
       invert: bool,
     ]
 
-proc mkCursorView*(st: State, dstrect: ptr Rect): CursorView =
+proc mkCursorView*(st: State): CursorView =
   return CursorView(
     parentState: st,
     dstrect: (x: 0.cint, y: 0.cint, w: 0.cint, h: 0.cint),

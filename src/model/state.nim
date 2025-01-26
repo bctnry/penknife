@@ -21,6 +21,11 @@ const VIEWPORT_GAP*: cint = 2
 # the height of the title bar. (grid)
 const TITLE_BAR_HEIGHT*: cint = 1
 
+const MM_NONE*: int = 0
+const MM_OPEN_AND_LOAD_FILE*: int = 1
+const MM_SAVE_FILE*: int = 2
+const MM_PROMPT_SAVE_AND_OPEN_FILE*: int = 3
+  
 type
   ViewPort* = ref object
     # col offset in document (grid)
@@ -56,6 +61,7 @@ type
     minibufferMode*: bool
     minibufferInputCursor*: int
     minibufferInputValue*: seq[Rune]
+    minibufferCommand*: int
     fkeyMap*: FKeyMap
 
 proc session*(st: State): TextBuffer = st.currentEditSession.textBuffer
@@ -81,16 +87,17 @@ proc mkNewState*(): State =
         minibufferMode: false,
         minibufferInputCursor: 0,
         minibufferInputValue: @[],
+        minibufferCommand: MM_NONE,
         fkeyMap: mkFKeyMap()
   )
 
-proc loadText*(st: var State, s: string, name: string = "*unnamed*", fullPath: string = ""): void =
+proc loadText*(st: State, s: string, name: string = "*unnamed*", fullPath: string = ""): void =
   st.currentEditSession.textBuffer = s.fromString
   st.currentEditSession.textBuffer.name = name
   st.currentEditSession.textBuffer.fullPath = fullPath
                               
-proc relayout*(st: var State): void
-proc syncViewPort*(st: var State): void =
+proc relayout*(st: State): void
+proc syncViewPort*(st: State): void =
   # move viewport to the place where the cursor can be seen.
   if st.cursor.x < st.viewPort.x: st.viewPort.x = st.cursor.x
   elif st.cursor.x >= st.viewPort.x + st.viewPort.w:
@@ -102,15 +109,15 @@ proc syncViewPort*(st: var State): void =
     st.viewPort.y = st.cursor.y - st.viewPort.h + 1
     st.relayout()
 
-proc startMinibufferInput*(st: var State, prompt: string = ""): void =
+proc startMinibufferInput*(st: State, prompt: string = ""): void =
   st.minibufferText = prompt
   st.minibufferMode = true
-proc minibufferCursorLeft*(st: var State): void =
+proc minibufferCursorLeft*(st: State): void =
   if st.minibufferInputCursor > 0: st.minibufferInputCursor -= 1
-proc minibufferCursorRight*(st: var State): void =
+proc minibufferCursorRight*(st: State): void =
   if st.minibufferInputCursor < st.minibufferInputValue.len: st.minibufferInputCursor += 1
 
-proc cursorLeft*(st: var State, session: TextBuffer): void =
+proc cursorLeft*(st: State, session: TextBuffer): void =
   if st.minibufferMode:
     st.minibufferCursorLeft()
     return
@@ -130,7 +137,7 @@ proc cursorLeft*(st: var State, session: TextBuffer): void =
     # if no: do nothing
   st.syncViewPort()
 
-proc cursorRight*(st: var State, session: TextBuffer): void =
+proc cursorRight*(st: State, session: TextBuffer): void =
   if st.minibufferMode:
     st.minibufferCursorRight()
     return
@@ -154,7 +161,7 @@ proc cursorRight*(st: var State, session: TextBuffer): void =
     cursor.expectingX = cursor.x
   st.syncViewPort()
 
-proc cursorUp*(st: var State, session: TextBuffer): void =
+proc cursorUp*(st: State, session: TextBuffer): void =
   if st.minibufferMode: return
   var cursor = st.cursor
   # if has prev line
@@ -171,7 +178,7 @@ proc cursorUp*(st: var State, session: TextBuffer): void =
     st.syncViewPort()
   # else: do nothing.
 
-proc cursorDown*(st: var State, session: TextBuffer): void =
+proc cursorDown*(st: State, session: TextBuffer): void =
   if st.minibufferMode: return
   var cursor = st.cursor
   if cursor.y < session.lineCount():
@@ -189,7 +196,7 @@ proc cursorDown*(st: var State, session: TextBuffer): void =
     cursor.y += 1
     st.syncViewPort()
 
-proc setCursor*(st: var State, line: int, col: int): void =
+proc setCursor*(st: State, line: int, col: int): void =
   var cursor = st.cursor
   cursor.x = col.cint
   cursor.y = line.cint
@@ -197,23 +204,23 @@ proc setCursor*(st: var State, line: int, col: int): void =
   st.selection.first.y = line.cint
   st.syncViewPort()
 
-proc clearSelection*(st: var State): void =
-  st.selectionInEffect = false
+proc clearSelection*(st: State): void =
+  st.currentEditSession.selectionInEffect = false
 
-proc setSelectionFirstPoint*(st: var State, firstX: int, firstY: int): void =
+proc setSelectionFirstPoint*(st: State, firstX: int, firstY: int): void =
   st.selection.first.x = firstX.cint
   st.selection.first.y = firstY.cint
 
-proc startSelection*(st: var State, firstX: int, firstY: int): void =
-  st.selectionInEffect = true
+proc startSelection*(st: State, firstX: int, firstY: int): void =
+  st.currentEditSession.selectionInEffect = true
   st.selection.first.x = firstX.cint
   st.selection.first.y = firstY.cint
   
-proc setSelectionLastPoint*(st: var State, lastX: int, lastY: int): void =
+proc setSelectionLastPoint*(st: State, lastX: int, lastY: int): void =
   st.selection.last.x = lastX.cint
   st.selection.last.y = lastY.cint
   
-proc relayout*(st: var State, windowWidth: cint, windowHeight: cint): void =
+proc relayout*(st: State, windowWidth: cint, windowHeight: cint): void =
   var viewPort = st.viewPort
   var w = windowWidth
   var h = windowHeight
@@ -228,48 +235,48 @@ proc relayout*(st: var State, windowWidth: cint, windowHeight: cint): void =
   # 1 for the status line, 1 for the mini buffer.
   viewPort.h = (h div st.gridSize.h) - 2 - TITLE_BAR_HEIGHT
 
-proc resetCurrentCursor*(tb: var State): void =
+proc resetCurrentCursor*(tb: State): void =
   let (line, col) = tb.session.resolvePosition(tb.cursor)
   tb.cursor.y = line.cint
   tb.cursor.x = col.cint
   
-proc relayout*(st: var State): void =
+proc relayout*(st: State): void =
   var viewPort = st.viewPort
   # assumes the window size didn't change.
   let linenumberPanelSize = max(2, digitCount(viewPort.y+viewPort.h)+1)
   viewPort.offset = linenumberPanelSize.cint+VIEWPORT_GAP
   viewPort.w = viewPort.fullGridW - linenumberPanelSize.cint - VIEWPORT_GAP
 
-proc verticalScroll*(st: var State, n: int): void =
+proc verticalScroll*(st: State, n: int): void =
   # n positive: up, n negative: down.
   let newViewPortY = max(0, min(st.viewPort.y-n, st.session.lineCount()-1))
   st.viewPort.y = newViewPortY.cint
   st.relayout()
   
-proc horizontalScroll*(st: var State, n: int): void =
+proc horizontalScroll*(st: State, n: int): void =
   # n positive: right, n negative: left
   if st.cursor.y < st.session.lineCount():
     let newViewPortX = max(0, min(st.viewPort.x-n, st.session.getLineLength(st.cursor.y)-1))
     st.viewPort.x = newViewPortX.cint
     st.relayout()
   
-proc gotoLineStart*(st: var State): void =
+proc gotoLineStart*(st: State): void =
   st.cursor.x = 0
   st.cursor.expectingX = 0
   st.syncViewPort()
-proc gotoLineEnd*(st: var State): void =
+proc gotoLineEnd*(st: State): void =
   if st.cursor.y < st.session.lineCount():
     st.cursor.x = st.session.getLineLength(st.cursor.y).cint
     st.cursor.expectingX = st.cursor.x
     st.syncViewPort()
     
-proc convertMousePositionX*(st: var State, x: cint): cint =
+proc convertMousePositionX*(st: State, x: cint): cint =
   return st.viewPort.x + ((x + st.gridSize.w div 2) div st.gridSize.w) - st.viewport.offset
 
-proc convertMousePositionY*(st: var State, y: cint): cint =
+proc convertMousePositionY*(st: State, y: cint): cint =
   return st.viewPort.y + (y div st.gridSize.h) - st.viewport.offsetY
 
 # NOTE THAT cursor movement should be orthogonal with 
-proc invalidateSelection*(st: var State): void =
-  st.selectionInEffect = false
+proc invalidateSelection*(st: State): void =
+  st.currentEditSession.selectionInEffect = false
   

@@ -1,11 +1,12 @@
 import std/[syncio, strformat, cmdline]
 import std/strutils
 import std/paths
+import std/unicode
 import sdl2
 import sdl2/ttf
 import model/[textbuffer, state, cursor]
 import ui/[font, texture, timer, sdl2_utils]
-import component/[titlebar, linenumberpanel, statusline, cursorview, editorview]
+import component/[titlebar, linenumberpanel, statusline, cursorview, editorview, minibufferview]
 import config
 
 const SCREEN_WIDTH: cint = 1280.cint
@@ -146,11 +147,12 @@ proc main(): int =
   window.getSize(w, h)
   globalState.relayout(w, h)
 
-  var titlebar = mkTitleBar(globalState, dstrect.addr)
-  var lineNumberPanel = mkLineNumberPanel(globalState, dstrect.addr)
-  var statusLine = mkStatusLine(globalState, dstrect.addr)
-  var cursorView = mkCursorView(globalState, dstrect.addr)
+  var titlebar = mkTitleBar(globalState)
+  var lineNumberPanel = mkLineNumberPanel(globalState)
+  var statusLine = mkStatusLine(globalState)
+  var cursorView = mkCursorView(globalState)
   var editorView = mkEditorView(globalState)
+  var minibufferView = mkMinibufferView(globalState)
 
   let backgroundColor = globalState.bgColor
   let foregroundColor = globalState.fgColor
@@ -165,12 +167,21 @@ proc main(): int =
     proc (): void =
       cursorView.renderWith(renderer)
   ), 500)
-  cursorBlinkTimer.start()
+  # cursorBlinkTimer.start()
+
+  # NOTE: this is for the OPEN_AND_LOAD_FILE command and is very hacky.
+  var openTargetStore = ""
   
   while not shouldQuit:
     shouldRefresh = false
     cursorDrawn = false
+    
     while sdl2.pollEvent(event):
+        
+      if globalState.minibufferMode:
+        minibufferView.handleEvent(event, shouldRefresh, shouldQuit)
+        continue
+    
       # handle event here.
       case event.kind:
         of sdl2.QuitEvent:
@@ -498,19 +509,26 @@ proc main(): int =
                 shouldRefresh = true
               else:
                 let alt = (modState and KMOD_ALT).bool
-                if alt and not ctrl:
+                if alt and ctrl:
+                  case k:
+                    of 's'.ord:
+                      # save-as.
+                      globalState.minibufferText = "Save As: "
+                      globalState.minibufferCommand = MM_SAVE_FILE
+                      globalState.minibufferMode = true
+                    else:
+                      discard nil
+                      
+                elif alt and not ctrl:
                   case k:
                     of 'w'.ord:
                       # copy.
-                      echo "ssss"
                       if not globalState.selectionInEffect:
-                        globalState.minibufferText = "No selection for cutting."
                         break
                       let start = min(globalState.selection.first, globalState.selection.last)
                       let last = max(globalState.selection.first, globalState.selection.last)
                       let data = globalState.session.getRangeString(start, last).cstring
                       discard sdl2.setClipboardText(data)
-                      globalState.minibufferText = "Copied."
                       globalState.invalidateSelection()
                     else:
                       discard nil 
@@ -531,7 +549,6 @@ proc main(): int =
                     of 'w'.ord:
                       # cut
                       if not globalState.selectionInEffect:
-                        globalState.minibufferText = "No selection for cutting."
                         break
                       let start = min(globalState.selection.first, globalState.selection.last)
                       let last = max(globalState.selection.first, globalState.selection.last)
@@ -541,7 +558,6 @@ proc main(): int =
                       globalState.invalidateSelection()
                       globalState.resetCurrentCursor()
                       globalState.syncViewPort()
-                      globalState.minibufferText = "Cut."
                     of 'y'.ord:
                       # paste.
                       let s = $getClipboardText()
@@ -560,7 +576,6 @@ proc main(): int =
                         globalState.cursor.x += dcol.cint
                       globalState.syncViewPort()
                       shouldRefresh = true
-                      globalState.minibufferText = "Pasted."
                     of 's'.ord:
                       # save.
                       if globalState.session.fullPath.len > 0:
@@ -570,10 +585,19 @@ proc main(): int =
                         f.close()
                         globalState.session.resetDirtyState()
                       else:
-                        globalState.minibufferText = "Not implemented."
+                        globalState.minibufferText = "Save As: "
+                        globalState.minibufferCommand = MM_SAVE_FILE
+                        globalState.minibufferMode = true
                     of 'o'.ord:
                       # open.
-                      discard nil
+                      if globalState.session.isDirty:
+                        globalState.minibufferText = "You haven't saved your changes yet, Save? (y/n) "
+                        globalState.minibufferMode = true
+                        globalState.minibufferCommand = MM_PROMPT_SAVE_AND_OPEN_FILE
+                      else:
+                         globalState.minibufferText = "Path: "
+                         globalState.minibufferCommand = MM_OPEN_AND_LOAD_FILE
+                         globalState.minibufferMode = true
                     of 'r'.ord:
                       # reload.
                       shouldReload = true
@@ -597,8 +621,8 @@ proc main(): int =
             shouldRefresh = true
           
         else:
-          discard
-
+          discard    
+          
     cursorBlinkTimer.check()
     if not shouldRefresh: continue
 
@@ -641,13 +665,7 @@ proc main(): int =
     statusLine.renderWith(renderer)
 
     # render minibuffer
-    if globalState.minibufferText.len > 0:
-      discard renderer.renderTextSolid(
-        globalState.globalFont, globalState.minibufferText.cstring,
-        0, offsetPY+((globalState.viewPort.h + 1)*gridSize.h).cint,
-        foregroundColor
-      )
-      globalState.minibufferText = ""
+    minibufferView.renderWith(renderer)
 
     renderer.present()
   
