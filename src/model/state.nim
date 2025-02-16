@@ -5,7 +5,8 @@ import cursor
 import selection
 import keyseq
 import editsession
-import ../ui/font
+import style
+import ../ui/tvfont
 
 proc digitCount(x: int): int =
   var m = 10
@@ -52,8 +53,7 @@ type
     currentEditSession*: EditSession
     gridSize*: GridSizeDescriptor
     globalFont*: TVFont
-    fgColor*: sdl2.Color
-    bgColor*: sdl2.Color
+    globalStyle*: Style
     # currently minibuffer is a one-line text/textfield.
     # the problem is minibuffer and the current text buffer shares the same
     # source of events.
@@ -81,8 +81,7 @@ proc mkNewState*(): State =
         currentEditSession: mkEditSession(),
         gridSize: GridSizeDescriptor(w: 0, h: 0),
         globalFont: TVFont(raw: nil, w: 0, h: 0),
-        fgColor: sdl2.color(0, 0, 0, 0),
-        bgColor: sdl2.color(0, 0, 0, 0),
+        globalStyle: mkStyle(),
         minibufferText: "",
         minibufferMode: false,
         minibufferInputCursor: 0,
@@ -130,7 +129,7 @@ proc cursorLeft*(st: State, session: TextBuffer): void =
     # if yes:
     if st.cursor.y > 0:
       # goto prev line. but we move pass 1 char so minus 1
-      let prevLineLen = session.getLine(st.cursor.y-1).len
+      let prevLineLen = session.getLineOfRune(st.cursor.y-1).len
       st.cursor.x = prevLineLen.cint
       st.cursor.expectingX = st.cursor.x
       st.cursor.y -= 1
@@ -145,7 +144,7 @@ proc cursorRight*(st: State, session: TextBuffer): void =
   # if at end-of-document
   if cursor.y >= session.lineCount(): return
   # if at line end
-  if cursor.x >= session.getLine(cursor.y).len:
+  if cursor.x >= session.getLineOfRune(cursor.y).len:
     # if there is next line
     if cursor.y < session.lineCount()-1:
       # set x to one over the first char
@@ -169,7 +168,7 @@ proc cursorUp*(st: State, session: TextBuffer): void =
     # if prev line is not as long
     if session.getLine(cursor.y-1).len <= cursor.expectingX:
       # set x at end of prev line
-      cursor.x = session.getLine(cursor.y-1).len.cint
+      cursor.x = session.getLineOfRune(cursor.y-1).len.cint
     # else we set cursor x at expected x
     else:
       cursor.x = cursor.expectingX
@@ -188,7 +187,7 @@ proc cursorDown*(st: State, session: TextBuffer): void =
     # else, if next line is not as long:
     elif session.getLine(cursor.y+1).len <= cursor.expectingX:
       # set x at end of next line
-      cursor.x = session.getLine(cursor.y+1).len.cint
+      cursor.x = session.getLineOfRune(cursor.y+1).len.cint
     # else we set cursor x at expected x
     else:
       cursor.x = cursor.expectingX
@@ -256,7 +255,7 @@ proc verticalScroll*(st: State, n: int): void =
 proc horizontalScroll*(st: State, n: int): void =
   # n positive: right, n negative: left
   if st.cursor.y < st.session.lineCount():
-    let newViewPortX = max(0, min(st.viewPort.x-n, st.session.getLineLength(st.cursor.y)-1))
+    let newViewPortX = max(0, st.viewPort.x-n)
     st.viewPort.x = newViewPortX.cint
     st.relayout()
   

@@ -1,5 +1,7 @@
 import std/[strutils, unicode, sequtils]
 import cursor
+import ../ui/[tvfont, sdl2_ui_utils]
+import ../aux
 
 type
   TextBuffer* = ref object
@@ -22,8 +24,11 @@ proc toString*(tb: TextBuffer): string =
 proc lineCount*(tb: TextBuffer): int =
   return tb.lineList.len
 
-proc getLineOfRune(tb: TextBuffer, l: int): seq[Rune] =
+proc getLineOfRune*(tb: TextBuffer, l: int): seq[Rune] =
   return tb.lineList[l]
+
+proc canonicalLineWidth*(tb: TextBuffer, i: int): int =
+  return 0
   
 proc getLine*(tb: TextBuffer, l: int): string =
   return $tb.getLineOfRune(l)
@@ -41,6 +46,63 @@ proc getName*(tb: TextBuffer): string =
   return tb.name
   
 proc resolvePosition*(tb: TextBuffer, line: int, col: int): tuple[line: int, col: int]
+
+# three kind of sizes are called as follow:
+# byte size - size in bytes (in utf8). in this system 1 cjk character is of size 3.
+# grid size - size in units of width. in this system half-width characters are of
+#             size 1 and full-width characters are of size 2.
+# canonical size - size in unicode codepoints. in this system every character is
+#                  of size 1.
+proc canonicalXToGridX*(tb: TextBuffer, x: int, y: int): int =
+  let (line, col) = tb.resolvePosition(y, x)
+  if line == tb.lineCount(): return 0
+  if tb.getLineOfRune(line).len <= 0: return 0
+  var r = 0
+  var i = 0
+  let l = tb.getLineOfRune(line)
+  while i < col:
+    let k = l[i]
+    if k.isFullWidth: r += 2 else: r += 1
+    i += 1
+  return r
+proc gridXToCanonicalX*(tb: TextBuffer, x: int, y: int): int =
+  if y == tb.lineCount(): return 0
+  if tb.getLineOfRune(y).len <= 0: return 0
+  var r = 0
+  var i = 0
+  var j = x
+  let l = tb.getLineOfRune(y)
+  while j > 0 and i < tb.getLineOfRune(y).len:
+    let canSize = if l[i].isFullWidth: 2 else: 1
+    if j < canSize: j = canSize
+    j -= canSize
+    if j == 2: break
+    i += 1
+  return i
+proc canonicalXToGridX*(tb: TextBuffer, font: TVFont, x: int, y: int): int =
+  let (line, col) = tb.resolvePosition(y, x)
+  if line == tb.lineCount(): return 0
+  if tb.getLineOfRune(line).len <= 0: return 0
+  var r = 0
+  var i = 0
+  let l = tb.getLineOfRune(line)
+  while i < col:
+    let k = l[i]
+    if k.isFullWidthByFont(font): r += 2 else: r += 1
+    i += 1
+  return r
+proc gridXToCanonicalX*(tb: TextBuffer, font: TVFont, x: int, y: int): int =
+  if y == tb.lineCount(): return 0
+  if tb.getLineOfRune(y).len <= 0: return 0
+  var i = 0
+  var j = x
+  let l = tb.getLineOfRune(y)
+  while j > 0 and i < tb.getLineOfRune(y).len:
+    let canSize = if l[i].isFullWidthByFont(font): 2 else: 1
+    if j == 1 and canSize == 2: break
+    j -= canSize
+    i += 1
+  return i
 
 proc insert*(tb: TextBuffer, l: int, c: int, ch: char): tuple[dline: int, dcol: int] =
   tb.dirty = true

@@ -5,7 +5,7 @@ import std/unicode
 import sdl2
 import sdl2/ttf
 import model/[textbuffer, state, cursor]
-import ui/[font, texture, timer, sdl2_utils]
+import ui/[tvfont, texture, timer, sdl2_utils]
 import component/[titlebar, linenumberpanel, statusline, cursorview, editorview, minibufferview]
 import config
 
@@ -89,13 +89,18 @@ proc main(): int =
   # load font according to config
   var gfontFileName = getGlobalConfig(CONFIG_KEY_FONT_PATH)
   var gfontSize = getGlobalConfig(CONFIG_KEY_FONT_SIZE).parseInt
-  if not loadFont(gfontFileName, globalState.globalFont, gfontSize):
+  if not loadFont(globalState.globalFont, gfontFileName, gfontSize):
     logError(&"Failed to load gfont {gfontFileName.repr}.")
     return QuitFailure
 
   # load color according to config
-  globalState.fgColor.loadColorFromString(getGlobalConfig(CONFIG_FOREGROUND_COLOR))
-  globalState.bgColor.loadColorFromString(getGlobalConfig(CONFIG_BACKGROUND_COLOR))
+  globalState.globalStyle.mainColor.loadColorFromString(getGlobalConfig(CONFIG_MAIN_COLOR))
+  globalState.globalStyle.backgroundColor.loadColorFromString(getGlobalConfig(CONFIG_BACKGROUND_COLOR))
+  globalState.globalStyle.auxColor.loadColorFromString(getGlobalConfig(CONFIG_AUX_COLOR))
+  globalState.globalStyle.highlightColor.loadColorFromString(getGlobalConfig(CONFIG_HIGHLIGHT_COLOR))
+  globalState.globalFont.useNewMainColor(globalState.globalStyle.mainColor)
+  globalState.globalFont.useNewAuxColor(globalState.globalStyle.auxColor)
+
 
   # create 
   window = sdl2.createWindow("penknife".cstring,
@@ -154,24 +159,15 @@ proc main(): int =
   var editorView = mkEditorView(globalState)
   var minibufferView = mkMinibufferView(globalState)
 
-  let backgroundColor = globalState.bgColor
-  let foregroundColor = globalState.fgColor
-  
   var cursorDrawn = false
   var shouldRefresh = false
   var selectionInitiated = false
-  var selectionInitiationX: cint = 0
-  var selectionInitiationY: cint = 0
-  var cursorColor: int = 1
   var cursorBlinkTimer = mkInterval((
     proc (): void =
       cursorView.renderWith(renderer)
   ), 500)
-  # cursorBlinkTimer.start()
+  cursorBlinkTimer.start()
 
-  # NOTE: this is for the OPEN_AND_LOAD_FILE command and is very hacky.
-  var openTargetStore = ""
-  
   while not shouldQuit:
     shouldRefresh = false
     cursorDrawn = false
@@ -250,15 +246,23 @@ proc main(): int =
         of sdl2.MouseButtonDown:
           globalState.clearSelection()
           if sdl2.getModState().cint == sdl2.KMOD_NONE.cint:
-            let y = min(globalState.viewPort.y + event.button.y div gridSize.h, globalState.session.lineCount())
-            var x = (
-              if y == globalState.session.lineCount():
-                0
-              else:
-                max(0, min(globalState.session.getLineLength(y),
-                    globalState.viewPort.x + ((event.button.x + gridSize.w div 2) div gridSize.w) - globalState.viewport.offset
-                ))
+            let relativeGridY = event.button.y div gridSize.h
+            let line = max(0,
+                           min(globalState.viewPort.y + relativeGridY,
+                               globalState.session.lineCount()) - globalState.viewport.offsetY
             )
+            var x = 0
+            if line < globalState.session.lineCount():
+              let relativeGridX = (event.button.x div gridSize.w) - globalState.viewport.offset
+              let baseGridX = session.canonicalXToGridX(globalState.globalFont,
+                                                        globalState.viewPort.x, line)
+              let absoluteGridX = max(0, baseGridX + relativeGridX)
+              let absoluteCanonicalX = session.gridXToCanonicalX(globalState.globalFont,
+                                                                 absoluteGridX,
+                                                                 line)
+              x = max(0, min(globalState.session.getLineLength(line), absoluteCanonicalX))
+            let y = line
+            x = min(x, globalState.session.getLineOfRune(y).len)
             globalState.setCursor(y, x)
             globalState.cursor.expectingX = x.cint
             globalState.syncViewPort()
@@ -285,14 +289,24 @@ proc main(): int =
         of sdl2.MouseMotion:
           if sdl2.getModState() == KMOD_NONE:
             if not (event.motion.xrel == 0 and event.motion.yrel == 0):
-              if (event.motion.state and 1).bool:
-                let y = max(0, min(globalState.convertMousePositionY(event.motion.y), globalState.session.lineCount()))
-                var x = (
-                  if y == globalState.session.lineCount():
-                    0
-                  else:
-                    max(0, min(globalState.session.getLineLength(y), globalState.convertMousePositionX(event.motion.x)))
+              if (event.motion.state == BUTTON_LEFT).bool:
+                let relativeGridY = event.motion.y div gridSize.h
+                let line = max(0,
+                               min(globalState.viewPort.y + relativeGridY,
+                                   globalState.session.lineCount()) - globalState.viewport.offsetY
                 )
+                var x = 0
+                if line < globalState.session.lineCount():
+                  let relativeGridX = (event.motion.x div gridSize.w) - globalState.viewport.offset
+                  let baseGridX = session.canonicalXToGridX(globalState.globalFont,
+                                                            globalState.viewPort.x, line)
+                  let absoluteGridX = max(0, baseGridX + relativeGridX)
+                  let absoluteCanonicalX = session.gridXToCanonicalX(globalState.globalFont,
+                                                                     absoluteGridX,
+                                                                     line)
+                  x = max(0, min(globalState.session.getLineLength(line), absoluteCanonicalX))
+                let y = line
+                x = min(x, globalState.session.getLineOfRune(y).len)
                 if selectionInitiated:
                   globalState.selectionInEffect = true
                   globalState.setSelectionLastPoint(x, y)
@@ -629,7 +643,9 @@ proc main(): int =
     echo "re-render"
     
     # render screen here.
-    renderer.setDrawColor(backgroundColor.r, backgroundColor.g, backgroundColor.b)
+    renderer.setDrawColor(globalState.globalStyle.backgroundColor.r,
+                          globalState.globalStyle.backgroundColor.g,
+                          globalState.globalStyle.backgroundColor.b)
     renderer.clear()
 
     let baselineX = (globalState.viewPort.offset*gridSize.w).cint
@@ -655,7 +671,7 @@ proc main(): int =
       discard renderer.renderTextSolid(
         globalState.globalFont, "*".cstring,
         (baselineX - (1+VIEWPORT_GAP)*gridSize.w).cint, TITLE_BAR_HEIGHT*gridSize.h+((renderRowBound-globalState.viewPort.y)*gridSize.h).cint,
-        foregroundColor
+        globalState.globalStyle.mainColor
       )
 
     # render title bar

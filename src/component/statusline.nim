@@ -1,7 +1,7 @@
 import std/strformat
 import sdl2
 import ../model/[state]
-import ../ui/[sdl2_utils]
+import ../ui/[sdl2_ui_utils]
 
 # status bar.
 
@@ -22,7 +22,9 @@ proc render*(renderer: RendererPtr, tb: StatusLine): void =
   tb.dstrect.y = ((st.viewPort.offsetY+st.viewPort.h)*st.gridSize.h).cint
   tb.dstrect.w = st.viewPort.fullGridW*st.gridSize.w
   tb.dstrect.h = st.gridSize.h
-  renderer.setDrawColor(st.fgColor.r, st.fgColor.g, st.fgColor.b)
+  renderer.setDrawColor(st.globalStyle.highlightColor.r,
+                        st.globalStyle.highlightColor.g,
+                        st.globalStyle.highlightColor.b)
   renderer.fillRect(tb.dstrect)
   let cursorLocationStr = (
     if st.selectionInEffect:
@@ -33,7 +35,7 @@ proc render*(renderer: RendererPtr, tb: StatusLine): void =
   discard renderer.renderTextSolid(
     tb.dstrect.addr, st.globalFont, cursorLocationStr.cstring,
     0, ((st.viewPort.offsetY+st.viewPort.h) * st.gridSize.h).cint,
-    st.bgColor
+    true
   )
   
 proc renderWith*(tb: StatusLine, renderer: RendererPtr): void =

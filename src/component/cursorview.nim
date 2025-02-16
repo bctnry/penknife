@@ -1,6 +1,7 @@
+import std/unicode
 import sdl2
 import ../model/[state, textbuffer, cursor]
-import ../ui/[sdl2_utils]
+import ../ui/[sdl2_ui_utils]
 
 # cursor.
 
@@ -21,7 +22,10 @@ proc mkCursorView*(st: State): CursorView =
 
 proc render*(renderer: RendererPtr, tb: CursorView, flat: bool = false): void =
   let st = tb.parentState
-  let cursorRelativeX = st.cursor.x - st.viewPort.x
+  let ss = st.currentEditSession
+  let viewportAGX = ss.textBuffer.canonicalXToGridX(st.globalFont, st.viewPort.x, st.cursor.y)
+  let cursorAGX = ss.textBuffer.canonicalXToGridX(st.globalFont, st.cursor.x, st.cursor.y)
+  let cursorRelativeX = (cursorAGX - viewportAGX).cint
   let cursorRelativeY = st.cursor.y - st.viewPort.y
   let selectionRangeStart = min(st.selection.first, st.selection.last)
   let selectionRangeEnd = max(st.selection.first, st.selection.last)
@@ -33,37 +37,43 @@ proc render*(renderer: RendererPtr, tb: CursorView, flat: bool = false): void =
       if flat:
         if st.selectionInEffect and
            between(cursorRelativeX, cursorRelativeY, selectionRangeStart, selectionRangeEnd):
-          st.bgColor
+          st.globalStyle.backgroundColor
         else:
-          st.fgColor
+          st.globalStyle.highlightColor
       else:
-        if tb.lateral.invert: st.bgColor else: st.fgColor
+        if tb.lateral.invert: st.globalStyle.backgroundColor
+        else: st.globalStyle.highlightColor
     )
-    let fgcolor = (
-      if flat:
-        if st.selectionInEffect and
-           between(cursorRelativeX, cursorRelativeY, selectionRangeStart, selectionRangeEnd):
-          st.fgColor
-        else:
-          st.bgColor
-      else:
-        if tb.lateral.invert: st.fgColor else: st.bgColor
+    let shouldFgColorBeAux = (
+      (flat and not (st.selectionInEffect and
+                     between(cursorRelativeX, cursorRelativeY, selectionRangeStart, selectionRangeEnd))) or
+      (not flat and not tb.lateral.invert)
     )
+    
     let cursorPX = baselineX+cursorRelativeX*st.gridSize.w
     let cursorPY = offsetPY+cursorRelativeY*st.gridSize.h
-    renderer.setDrawColor(bgcolor.r, bgcolor.g, bgcolor.b)
-    tb.dstrect.x = cursorPX
-    tb.dstrect.y = cursorPY
-    tb.dstrect.w = st.gridSize.w
-    tb.dstrect.h = st.gridSize.h
-    renderer.fillRect(tb.dstrect.addr)
-    if st.cursor.y < st.session.lineCount() and
-       st.cursor.x < st.session.getLineLength(st.cursor.y):
-      var s = ""
-      s.add(st.session.getLine(st.cursor.y)[st.cursor.x])
-      discard renderer.renderTextSolid(
-        tb.dstrect.addr, st.globalFont, s.cstring, cursorPX, cursorPY, fgcolor
-      )
+    let lineOfRune = st.session.getLineOfRune(st.cursor.y)
+    if st.cursor.x >= lineOfRune.len:
+      renderer.setDrawColor(bgcolor.r, bgcolor.g, bgcolor.b)
+      tb.dstrect.x = cursorPX
+      tb.dstrect.y = cursorPY
+      tb.dstrect.w = st.gridSize.w
+      tb.dstrect.h = st.gridSize.h
+      renderer.fillRect(tb.dstrect.addr)
+    else:
+      var s = st.session.getLineOfRune(st.cursor.y)[st.cursor.x]
+      renderer.setDrawColor(bgcolor.r, bgcolor.g, bgcolor.b)
+      tb.dstrect.x = cursorPX
+      tb.dstrect.y = cursorPY
+      tb.dstrect.w = (if s.isFullWidthByFont(st.globalFont): 2 else: 1) * st.gridSize.w
+      tb.dstrect.h = st.gridSize.h
+      renderer.fillRect(tb.dstrect.addr)
+      if st.cursor.y < st.session.lineCount() and
+         st.cursor.x < st.session.getLineLength(st.cursor.y):
+        discard renderer.renderTextSolid(
+          tb.dstrect.addr, st.globalFont, ($s).cstring, cursorPX, cursorPY,
+          shouldFgColorBeAux
+        )
     if not flat:
       renderer.present()
       tb.lateral.invert = not tb.lateral.invert

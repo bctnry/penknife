@@ -1,6 +1,6 @@
 import sdl2
 import ../model/[state, textbuffer]
-import ../ui/[font, sdl2_utils, texture]
+import ../ui/[tvfont, sdl2_utils, sdl2_ui_utils, texture]
 
 # titlebar.
 # in penknife the titlebar's rendering depends on:
@@ -69,9 +69,9 @@ proc render*(renderer: RendererPtr, tb: TitleBar): void =
   tb.dstrect.w = tb.lateral.windowW*tb.lateral.gridSizeW
   tb.dstrect.h = TITLE_BAR_HEIGHT*tb.lateral.gridSizeH
   renderer.setDrawColor(
-    tb.parentState.fgColor.r,
-    tb.parentState.fgColor.g,
-    tb.parentState.fgColor.b
+    tb.parentState.globalStyle.highlightColor.r,
+    tb.parentState.globalStyle.highlightColor.g,
+    tb.parentState.globalStyle.highlightColor.b
   )
   renderer.fillRect(tb.dstrect)
   var titleBarStr = ""
@@ -80,11 +80,11 @@ proc render*(renderer: RendererPtr, tb: TitleBar): void =
   titleBarStr &= " | "
   titleBarStr &= tb.lateral.fullPath
   if titleBarStr.len <= 0: return
-  let texture = renderer.mkTextTexture(
-    tb.lateral.font, titleBarStr.cstring, tb.parentState.bgColor
-  )
+  let surface = tb.lateral.font.renderUTF8Blended(titleBarStr, renderer, true)
+  let texture = surface.makeLTextureWith(renderer)
+  surface.freeSurface()
   tb.dstrect.w = texture.w
-  renderer.copyEx(texture.raw, nil, tb.dstrect.addr, 0.cdouble, nil)
+  renderer.copy(texture.raw, nil, tb.dstrect.addr)
   texture.dispose()
   
 proc renderWith*(tb: TitleBar, renderer: RendererPtr): void =

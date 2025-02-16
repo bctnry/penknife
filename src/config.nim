@@ -23,7 +23,9 @@ proc loadGlobalConfig*(): bool =
 
 const CONFIG_KEY_FONT_PATH* = "font_path"
 const CONFIG_KEY_FONT_SIZE* = "font_size"
-const CONFIG_FOREGROUND_COLOR* = "fg_color"
+const CONFIG_MAIN_COLOR* = "main_color"
+const CONFIG_HIGHLIGHT_COLOR* = "hl_color"
+const CONFIG_AUX_COLOR* = "aux_color"
 const CONFIG_BACKGROUND_COLOR* = "bg_color"
 
 proc getGlobalConfig*(key: string): string =
