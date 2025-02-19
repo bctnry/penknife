@@ -1,7 +1,7 @@
 import std/unicode
 import sdl2
 import ../model/[state, textbuffer, cursor]
-import ../ui/[sdl2_ui_utils]
+import ../ui/[sdl2_ui_utils, tvfont]
 
 # cursor.
 
@@ -33,22 +33,13 @@ proc render*(renderer: RendererPtr, tb: CursorView, flat: bool = false): void =
   if cursorRelativeX >= 0 and cursorRelativeY < st.viewPort.w:
     let baselineX = (st.viewPort.offset*st.gridSize.w).cint
     let offsetPY = (st.viewPort.offsetY*st.gridSize.h).cint
-    let bgcolor = (
-      if flat:
-        if st.selectionInEffect and
-           between(cursorRelativeX, cursorRelativeY, selectionRangeStart, selectionRangeEnd):
-          st.globalStyle.backgroundColor
-        else:
-          st.globalStyle.highlightColor
-      else:
-        if tb.lateral.invert: st.globalStyle.backgroundColor
-        else: st.globalStyle.highlightColor
-    )
     let shouldFgColorBeAux = (
       (flat and not (st.selectionInEffect and
                      between(cursorRelativeX, cursorRelativeY, selectionRangeStart, selectionRangeEnd))) or
       (not flat and not tb.lateral.invert)
     )
+    let bgcolor = if shouldFgColorBeAux: st.globalStyle.highlightColor
+                  else: st.globalStyle.backgroundColor
     
     let cursorPX = baselineX+cursorRelativeX*st.gridSize.w
     let cursorPY = offsetPY+cursorRelativeY*st.gridSize.h
@@ -70,9 +61,9 @@ proc render*(renderer: RendererPtr, tb: CursorView, flat: bool = false): void =
       renderer.fillRect(tb.dstrect.addr)
       if st.cursor.y < st.session.lineCount() and
          st.cursor.x < st.session.getLineLength(st.cursor.y):
-        discard renderer.renderTextSolid(
-          tb.dstrect.addr, st.globalFont, ($s).cstring, cursorPX, cursorPY,
-          shouldFgColorBeAux
+        discard st.globalFont.renderUTF8Blended(
+          $s, renderer, nil,
+          cursorPX.cint, cursorPY.cint, shouldFgColorBeAux
         )
     if not flat:
       renderer.present()

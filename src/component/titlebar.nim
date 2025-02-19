@@ -80,12 +80,11 @@ proc render*(renderer: RendererPtr, tb: TitleBar): void =
   titleBarStr &= " | "
   titleBarStr &= tb.lateral.fullPath
   if titleBarStr.len <= 0: return
-  let surface = tb.lateral.font.renderUTF8Blended(titleBarStr, renderer, true)
-  let texture = surface.makeLTextureWith(renderer)
-  surface.freeSurface()
-  tb.dstrect.w = texture.w
-  renderer.copy(texture.raw, nil, tb.dstrect.addr)
-  texture.dispose()
+  discard tb.lateral.font.renderUTF8Blended(
+    titleBarStr, renderer, nil,
+    tb.dstrect.x, tb.dstrect.y,
+    true
+  )
   
 proc renderWith*(tb: TitleBar, renderer: RendererPtr): void =
   renderer.render(tb)

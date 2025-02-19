@@ -1,7 +1,7 @@
 import std/[unicode, paths]
 import sdl2
 import ../model/[state, textbuffer]
-import ../ui/[sdl2_ui_utils, texture]
+import ../ui/[sdl2_ui_utils, texture, tvfont]
 
 # status bar.
 
@@ -24,15 +24,11 @@ proc render*(renderer: RendererPtr, mv: MinibufferView): void =
     text &= $(st.minibufferInputValue)
     text &= "_"
   if text.len > 0:
-    let texture = renderer.mkTextTexture(
-      st.globalFont, text.cstring, false
+    discard st.globalFont.renderUTF8Blended(
+      text, renderer, nil,
+      0, offsetPY+((st.viewPort.h + 1)*st.gridSize.h).cint,
+      false
     )
-    mv.dstrect.x = 0
-    mv.dstrect.y = offsetPY+((st.viewPort.h + 1)*st.gridSize.h).cint
-    mv.dstrect.w = texture.w
-    mv.dstrect.h = st.gridSize.h
-    renderer.copyEx(texture.raw, nil, mv.dstrect.addr, 0.cdouble, nil)
-    texture.dispose()
   
 proc renderWith*(tb: MinibufferView, renderer: RendererPtr): void =
   renderer.render(tb)

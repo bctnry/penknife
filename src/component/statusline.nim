@@ -1,7 +1,7 @@
 import std/strformat
 import sdl2
 import ../model/[state]
-import ../ui/[sdl2_ui_utils]
+import ../ui/[sdl2_ui_utils, tvfont]
 
 # status bar.
 
@@ -32,8 +32,8 @@ proc render*(renderer: RendererPtr, tb: StatusLine): void =
     else:
        &"({st.cursor.y+1},{st.cursor.x+1})"
   )
-  discard renderer.renderTextSolid(
-    tb.dstrect.addr, st.globalFont, cursorLocationStr.cstring,
+  discard st.globalFont.renderUTF8Blended(
+    cursorLocationStr, renderer, nil,
     0, ((st.viewPort.offsetY+st.viewPort.h) * st.gridSize.h).cint,
     true
   )

@@ -26,23 +26,21 @@ proc render*(renderer: RendererPtr, lnp: LineNumberPanel): void =
   # render line number
   for i in st.viewPort.y..<renderRowBound:
     let lnStr = ($(i+1))
-    let lnSurface = st.globalFont.renderUTF8Blended(lnStr, renderer, st.cursor.y == i)
-    let lnTexture = lnSurface.makeLTextureWith(renderer)
-    lnSurface.freeSurface()
+    let width = st.globalFont.calculateWidth(lnStr, renderer)
+    lnp.dstrect.x = ((st.viewPort.offset-VIEWPORT_GAP)*st.gridSize.w-width).cint
+    lnp.dstrect.y = offsetPY + ((i-st.viewPort.y)*st.gridSize.h).cint
+    lnp.dstrect.w = width.cint
+    lnp.dstrect.h = st.globalFont.h
     if st.cursor.y == i:
-      lnp.dstrect.x = 0
-      lnp.dstrect.y = offsetPY + ((i-st.viewPort.y)*st.gridSize.h).cint
-      lnp.dstrect.w = baselineX-(VIEWPORT_GAP-1)*st.gridSize.w
-      lnp.dstrect.h = st.gridSize.h
       renderer.setDrawColor(st.globalStyle.highlightColor.r,
                             st.globalStyle.highlightColor.g,
                             st.globalStyle.highlightColor.b)
       renderer.fillRect(lnp.dstrect)
-    lnp.dstrect.x = (st.viewPort.offset-VIEWPORT_GAP)*st.gridSize.w-lnTexture.w
-    lnp.dstrect.y = offsetPY + ((i-st.viewPort.y)*st.gridSize.h).cint
-    lnp.dstrect.w = lnTexture.w
-    lnp.dstrect.h = lnTexture.h
-    renderer.copy(lnTexture.raw, nil, lnp.dstrect.addr)
+    discard st.globalFont.renderUTF8Blended(
+      lnStr, renderer, nil,
+      lnp.dstrect.x, lnp.dstrect.y,
+      st.cursor.y == i
+    )
     
     # render selection marker
   if st.selectionInEffect:
@@ -56,10 +54,9 @@ proc render*(renderer: RendererPtr, lnp: LineNumberPanel): void =
           elif i == selectionRangeStart: "{"
           elif i == selectionRangeEnd: "}"
           else: "|"
-        discard renderer.renderTextSolid(
-          lnp.dstrect.addr, st.globalFont, indicator.cstring,
-          baselineX-VIEWPORT_GAP*st.gridSize.w, lnp.dstrect.y,
-          st.cursor.y == i
+        discard st.globalFont.renderUTF8Blended(
+          indicator, renderer, nil,
+          baselineX-VIEWPORT_GAP*st.gridSize.w, lnp.dstrect.y
         )
             
 
