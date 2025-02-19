@@ -1,12 +1,7 @@
-import std/unicode
-from sdl2 import color
 import textbuffer
-import cursor
-import selection
 import editsession
 import style
 import ../ui/tvfont
-import viewport
 
   
 type

@@ -1,17 +1,17 @@
 import std/[syncio, strformat, cmdline]
 import std/strutils
 import std/paths
-import std/unicode
 import sdl2
 import sdl2/ttf
 import model/[textbuffer, editsession, state, cursor]
-import ui/[tvfont, texture, timer, sdl2_utils]
-import component/[titlebar, linenumberpanel, cursorview, editorview, editorframe]
+import ui/[tvfont, timer]
+import component/[cursorview, editorview, editorframe]
 import config
 import aux
 
 const SCREEN_WIDTH: cint = 1280.cint
 const SCREEN_HEIGHT: cint = 768.cint
+const TICK = 1000 div 30
 
 proc logError(x: string): void =
   stderr.writeLine(x)
@@ -39,7 +39,7 @@ proc main(): int =
   # load font according to config
   var gfontFileName = getGlobalConfig(CONFIG_KEY_FONT_PATH)
   var gfontSize = getGlobalConfig(CONFIG_KEY_FONT_SIZE).parseInt
-  if not loadFont(globalState.globalStyle.font, gfontFileName, gfontSize):
+  if not loadFont(globalState.globalStyle.font, gfontFileName.cstring, gfontSize):
     logError(&"Failed to load gfont {gfontFileName.repr}.")
     return QuitFailure
 
@@ -67,7 +67,6 @@ proc main(): int =
   if renderer.isNil:
     logError(&"Failed to create renderer: {sdl2.getError()}")
     return QuitFailure
-  let screenSurface = window.getSurface()
 
   # setup textbuffer
   if paramCount() <= 0:
@@ -102,8 +101,6 @@ proc main(): int =
   window.getSize(w, h)
 
   var editorFrame = mkEditorFrame(globalState)
-  var titlebar = editorFrame.titleBar
-  var lineNumberPanel = editorFrame.lineNumberPanel
   var cursorView = editorFrame.cursor
   var editorView = editorFrame.editorView
   editorFrame.relayout(0, 0, w div gridSize.w, h div gridSize.h)
@@ -114,14 +111,16 @@ proc main(): int =
   var cursorBlinkTimer = mkInterval((
     proc (): void =
       cursorView.renderWith(renderer)
-  ), 500)
+  ), 1000)
   cursorBlinkTimer.start()
+  var framerateTimer = mkRegulatingTimer(TICK)
+  framerateTimer.start()
 
   while not shouldQuit:
     shouldRefresh = false
     cursorDrawn = false
-    
-    while sdl2.pollEvent(event):
+
+    if sdl2.waitEvent(event):
       # handle event here.
       case event.kind:
         of sdl2.QuitEvent:
@@ -550,7 +549,9 @@ proc main(): int =
                       break
                     else:
                       discard nil
-
+                else:
+                  echo "#"
+                        
           shouldRefresh = true
         of sdl2.KeyUp:
           if not (sdl2.getModState() and sdl2.KMOD_CTRL).bool:
@@ -584,6 +585,7 @@ proc main(): int =
     
 
     renderer.present()
+
   
   renderer.destroy()
   window.destroyWindow()

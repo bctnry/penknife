@@ -2,7 +2,6 @@ import cursor
 import textbuffer
 import selection
 import viewport
-import ../aux
 
 # the gap between the linenumber panel and the viewport. (grid)
 const VIEWPORT_GAP*: cint = 2

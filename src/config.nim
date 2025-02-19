@@ -1,5 +1,5 @@
 import std/strtabs
-import std/[files, dirs, paths, syncio]
+import std/[files, paths, syncio]
 import std/strutils
 
 var config: StringTableRef

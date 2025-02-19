@@ -76,5 +76,23 @@ proc check*(timeout: Timeout): void =
 
 proc stop*(timeout: Timeout): void =
   timeout.t.stop()
-    
+
+type
+  RegulatingTimer* = ref object
+    t: Timer
+    i: uint32
+
+proc mkRegulatingTimer*(intervalMS: uint32): RegulatingTimer =
+  return RegulatingTimer(t: mkTimer(), i: intervalMS)
+
+proc start*(rt: RegulatingTimer): void =
+  rt.t.start()
+
+proc waitOut*(x: RegulatingTimer): void =
+  let t = sdl2.getTicks()
+  if x.t.started and not x.t.paused:
+    echo "tb ", t, " ", x.t.startedAt, " ", x.t.ticksPassed
+    sdl2.delay(x.i - (t - x.t.startedAt + x.t.ticksPassed))
+    x.t.ticksPassed = 0
+    x.t.startedAt = t
   

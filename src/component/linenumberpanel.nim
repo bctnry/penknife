@@ -1,6 +1,6 @@
 import sdl2
 import ../model/[state, textbuffer, cursor]
-import ../ui/[sdl2_utils, sdl2_ui_utils, texture, tvfont]
+import ../ui/[tvfont]
 import ../aux
 
 # line number panel.
@@ -45,7 +45,7 @@ proc render*(renderer: RendererPtr, lnp: LineNumberPanel): void =
   let rightBorderX = (baselineX + lnpTargetWidth*st.gridSize.w).cint
   # right border (end of number)
   let lnRightBorder = rightBorderX - 2*st.gridSize.w
-  echo "bor ", baselineX, " ", offsetPY, " ", rightBorderX
+  echo "bor ", renderRowBound, " ", digitCount(renderRowBound)
   # render line number
   for i in session.viewPort.y..<renderRowBound:
     let lnStr = ($(i+1))

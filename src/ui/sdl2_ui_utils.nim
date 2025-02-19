@@ -1,7 +1,5 @@
 import std/unicode
-import sdl2
 import tvfont
-import texture
 import ../aux
 
 proc isFullWidthByFont*(k: Rune, font: TVFont): bool {.inline.} =

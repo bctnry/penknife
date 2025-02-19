@@ -1,6 +1,5 @@
-import std/[unicode, tables, sequtils]
+import std/[unicode, tables]
 import sdl2
-import sdl2_utils
 import sdl2/ttf
 import ../aux
 

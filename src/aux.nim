@@ -64,7 +64,7 @@ proc isFullWidth*(ch: Rune): bool =
 proc digitCount*(x: int): int =
   var m = 10
   var res = 1
-  while m < x:
+  while m <= x:
     m *= 10
     res += 1
   return res
