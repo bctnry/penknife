@@ -7,7 +7,7 @@ type
   TextBuffer* = ref object
     name*: string
     fullPath*: string
-    dirty: bool
+    dirty*: bool
     lineList: seq[seq[Rune]]
 
 proc fromString*(s: string, fp: string = ""): TextBuffer =

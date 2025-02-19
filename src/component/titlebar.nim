@@ -1,6 +1,6 @@
 import sdl2
 import ../model/[state, textbuffer]
-import ../ui/[tvfont, sdl2_utils, sdl2_ui_utils, texture]
+import ../ui/[tvfont]
 
 # titlebar.
 # in penknife the titlebar's rendering depends on:
@@ -9,65 +9,40 @@ import ../ui/[tvfont, sdl2_utils, sdl2_ui_utils, texture]
 #   3.  the current global font;
 # all of which requires us to depend on the globalState.
 
+const TITLE_BAR_HEIGHT* = 1
 
 type
   TitleBar* = ref object
     parentState*: State
     dstrect*: Rect
-    lateral: tuple[
-      dirty: bool,
-      name: string,
-      fullPath: string,
-      windowW: cint,
-      gridSizeW: cint,
-      gridSizeH: cint,
-      font: TVFont
-    ]
+    offsetX*: cint
+    offsetY*: cint
+    width*: cint
+    height*: cint
 
 proc mkTitleBar*(st: State): TitleBar =
   return TitleBar(
     parentState: st,
     dstrect: (x: 0, y: 0, w: 0, h: 0),
-    lateral: (
-      dirty: st.session.isDirty,
-      name: st.session.name,
-      fullPath: st.session.fullPath,
-      windowW: st.viewport.fullGridW,
-      gridSizeW: st.gridSize.w,
-      gridSizeH: st.gridSize.h,
-      font: st.globalFont
-    )
+    offsetX: 0,
+    offsetY: 0,
+    width: 0,
+    height: 0,
   )
 
-proc check(tb: TitleBar): bool =
-  let st = tb.parentState
-  let lt = tb.lateral
-  return (
-    lt.dirty == st.session.isDirty and
-    lt.name == st.session.name and
-    lt.fullPath == st.session.fullPath and
-    lt.windowW == st.viewport.fullGridW and
-    lt.gridSizeW == st.gridSize.w and
-    lt.gridSizeH == st.gridSize.h and
-    lt.font == st.globalFont
-  )
-
-proc sync(tb: TitleBar): void =
-  let st = tb.parentState
-  tb.lateral.dirty = st.session.isDirty
-  tb.lateral.name = st.session.name
-  tb.lateral.fullPath = st.session.fullPath
-  tb.lateral.windowW = st.viewport.fullGridW
-  tb.lateral.gridSizeW = st.gridSize.w
-  tb.lateral.gridSizeH = st.gridSize.h
-  tb.lateral.font = st.globalFont
+proc relayout*(tb: TitleBar, x: cint, y: cint, w: cint, h: cint): void =
+  tb.offsetX = x
+  tb.offsetY = y
+  tb.width = w
+  tb.height = h
 
 proc render*(renderer: RendererPtr, tb: TitleBar): void =
-  tb.sync()
-  tb.dstrect.x = 0
-  tb.dstrect.y = 0
-  tb.dstrect.w = tb.lateral.windowW*tb.lateral.gridSizeW
-  tb.dstrect.h = TITLE_BAR_HEIGHT*tb.lateral.gridSizeH
+  let st = tb.parentState
+  let ss = st.currentEditSession
+  tb.dstrect.x = tb.offsetX*st.gridSize.w
+  tb.dstrect.y = tb.offsetY*st.gridSize.h
+  tb.dstrect.w = tb.width*st.gridSize.w
+  tb.dstrect.h = tb.height*st.gridSize.h
   renderer.setDrawColor(
     tb.parentState.globalStyle.highlightColor.r,
     tb.parentState.globalStyle.highlightColor.g,
@@ -75,12 +50,12 @@ proc render*(renderer: RendererPtr, tb: TitleBar): void =
   )
   renderer.fillRect(tb.dstrect)
   var titleBarStr = ""
-  titleBarStr &= (if tb.lateral.dirty: "[*] " else: "[ ] ")
-  titleBarStr &= tb.lateral.name
+  titleBarStr &= (if ss.textBuffer.dirty: "[*] " else: "[ ] ")
+  titleBarStr &= ss.textBuffer.name
   titleBarStr &= " | "
-  titleBarStr &= tb.lateral.fullPath
+  titleBarStr &= ss.textBuffer.fullPath
   if titleBarStr.len <= 0: return
-  discard tb.lateral.font.renderUTF8Blended(
+  discard st.globalStyle.font.renderUTF8Blended(
     titleBarStr, renderer, nil,
     tb.dstrect.x, tb.dstrect.y,
     true
