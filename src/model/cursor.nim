@@ -1,3 +1,5 @@
+import std/unicode
+
 type
   Cursor* = ref object
     # column (grid)
@@ -48,3 +50,14 @@ proc between*(c: Cursor, start: Cursor, last: Cursor): bool =
     (last.y == c.y and c.x <= last.x)
   )
 
+proc advanceWith*(c: Cursor, r: seq[Rune]): Cursor =
+  var line = c.y
+  var col = c.x
+  for k in r:
+    if $k == "\n":
+      line += 1
+      col = 0
+    else:
+      col += 1
+  return Cursor(x: col, y: line, expectingX: col)
+  

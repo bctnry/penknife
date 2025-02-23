@@ -48,7 +48,8 @@ proc render*(renderer: RendererPtr, tb: CursorView, flat: bool = false): void =
     
     let cursorPX = baselineX+cursorRelativeX*st.gridSize.w
     let cursorPY = offsetPY+cursorRelativeY*st.gridSize.h
-    let lineOfRune = ss.textBuffer.getLineOfRune(ss.cursor.y)
+    let lineOfRune = if ss.cursor.y >= ss.textBuffer.lineCount(): @[]
+                     else: ss.textBuffer.getLineOfRune(ss.cursor.y)
     if ss.cursor.x >= lineOfRune.len:
       renderer.setDrawColor(bgcolor.r, bgcolor.g, bgcolor.b)
       tb.dstrect.x = cursorPX

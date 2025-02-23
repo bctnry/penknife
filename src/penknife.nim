@@ -1,9 +1,10 @@
 import std/[syncio, strformat, cmdline]
 import std/strutils
 import std/paths
+import std/unicode
 import sdl2
 import sdl2/ttf
-import model/[textbuffer, editsession, state, cursor]
+import model/[textbuffer, editsession, state, cursor, undoredo]
 import ui/[tvfont, timer]
 import component/[cursorview, editorview, editorframe]
 import config
@@ -11,7 +12,6 @@ import aux
 
 const SCREEN_WIDTH: cint = 1280.cint
 const SCREEN_HEIGHT: cint = 768.cint
-const TICK = 1000 div 30
 
 proc logError(x: string): void =
   stderr.writeLine(x)
@@ -51,7 +51,6 @@ proc main(): int =
   globalState.globalStyle.font.useNewMainColor(globalState.globalStyle.mainColor)
   globalState.globalStyle.font.useNewAuxColor(globalState.globalStyle.auxColor)
 
-
   # create 
   window = sdl2.createWindow("penknife".cstring,
                              sdl2.SDL_WINDOWPOS_UNDEFINED,
@@ -86,17 +85,7 @@ proc main(): int =
 
   var event: sdl2.Event
   var shouldQuit: bool = false
-  var ctrl: bool = false
-  proc setCtrl(): void =
-    ctrl = true
-  proc unsetCtrl(): void =
-    ctrl = false
-  var alt: bool = false
-  proc setAlt(): void =
-    alt = true
-  proc unsetAlt(): void =
-    alt = false
-    
+  
   var w, h: cint
   window.getSize(w, h)
 
@@ -108,19 +97,19 @@ proc main(): int =
   var cursorDrawn = false
   var shouldRefresh = false
   var selectionInitiated = false
+  var selectionInitiationX = 0
+  var selectionInitiationY = 0
   var cursorBlinkTimer = mkInterval((
     proc (): void =
       cursorView.renderWith(renderer)
   ), 1000)
-  cursorBlinkTimer.start()
-  var framerateTimer = mkRegulatingTimer(TICK)
-  framerateTimer.start()
+  # cursorBlinkTimer.start()
 
   while not shouldQuit:
     shouldRefresh = false
     cursorDrawn = false
 
-    if sdl2.waitEvent(event):
+    if sdl2.waitEvent(event).bool:
       # handle event here.
       case event.kind:
         of sdl2.QuitEvent:
@@ -143,29 +132,30 @@ proc main(): int =
         of sdl2.TextInput:
           # NOTE THAT when alt is activated this event is still fired
           # we bypass this by doing this thing:
-          if (sdl2.getModState() and KMOD_ALT).bool: break
-          if globalState.currentEditSession.selectionInEffect:
-            let s1 = min(globalState.currentEditSession.selection.first, globalState.currentEditSession.selection.last)
-            let s2 = max(globalState.currentEditSession.selection.first, globalState.currentEditSession.selection.last)
-            globalState.currentEditSession.textBuffer.delete(s1, s2)
-            globalState.currentEditSession.setCursor(s1.y, s1.x)
-            globalState.currentEditSession.selectionInEffect = false
-          var i = 0
-          var l = globalState.currentEditSession.cursor.y
-          var c = globalState.currentEditSession.cursor.x
-          var s = ""
-          while event.text.text[i] != '\x00':
-            s.add(event.text.text[i])
-            i += 1
-          let (dline, dcol) = globalState.currentEditSession.textBuffer.insert(l, c, s)
-          if dline > 0:
-            globalState.currentEditSession.cursor.y += dline.cint
-            globalState.currentEditSession.cursor.x = dcol.cint
-          else:
-            globalState.currentEditSession.cursor.x += dcol.cint
-          globalState.currentEditSession.syncViewPort()
-          shouldRefresh = true
-          echo "input"
+          if not (sdl2.getModState() and KMOD_ALT).bool:
+            if globalState.currentEditSession.selectionInEffect:
+              let s1 = min(globalState.currentEditSession.selection.first, globalState.currentEditSession.selection.last)
+              let s2 = max(globalState.currentEditSession.selection.first, globalState.currentEditSession.selection.last)
+              globalState.currentEditSession.textBuffer.delete(s1, s2)
+              globalState.currentEditSession.setCursor(s1.y, s1.x)
+              globalState.currentEditSession.selectionInEffect = false
+            var i = 0
+            var l = globalState.currentEditSession.cursor.y
+            var c = globalState.currentEditSession.cursor.x
+            var s = ""
+            while event.text.text[i] != '\x00':
+              s.add(event.text.text[i])
+              i += 1
+            globalState.currentEditSession.recordInsertAction(mkNewCursor(c, l), s.toRunes())
+            let (dline, dcol) = globalState.currentEditSession.textBuffer.insert(l, c, s)
+            if dline > 0:
+              globalState.currentEditSession.cursor.y += dline.cint
+              globalState.currentEditSession.cursor.x = dcol.cint
+            else:
+              globalState.currentEditSession.cursor.x += dcol.cint
+            globalState.currentEditSession.syncViewPort()
+            shouldRefresh = true
+            # echo "input"
               
         of sdl2.MouseWheel:
           # NOTE: even if we do it this way this is still way too slow. it's easy to
@@ -210,20 +200,26 @@ proc main(): int =
             globalState.currentEditSession.cursor.expectingX = x.cint
             globalState.currentEditSession.syncViewPort()
             selectionInitiated = true
+            selectionInitiationX = x
+            selectionInitiationY = y
             globalState.currentEditSession.selection.first.x = x.cint
             globalState.currentEditSession.selection.first.y = y.cint
             shouldRefresh = true
 
         of sdl2.MouseButtonUp:
-          let y = max(0, min(globalState.currentEditSession.viewPort.y + event.button.y div gridSize.h, globalState.currentEditSession.textBuffer.lineCount()))
-          var x = (
-            if y == globalState.currentEditSession.textBuffer.lineCount():
-              0
-            else:
-              max(0, min(globalState.currentEditSession.textBuffer.getLineLength(y),
-                         globalState.currentEditSession.viewPort.x + ((event.button.x + gridSize.w div 2) div gridSize.w) - editorView.offsetX
-              ))
-          )
+          let relativeGridY = event.button.y div gridSize.h
+          let y = max(0, min(globalState.currentEditSession.viewPort.y + relativeGridY, globalState.currentEditSession.textBuffer.lineCount()) - editorView.offsetY)
+          var x = 0
+          if y < globalState.currentEditSession.textBuffer.lineCount():
+            let relativeGridX = (event.button.x div gridSize.w) - editorView.offsetX
+            let baseGridX = session.textBuffer.canonicalXToGridX(globalState.globalStyle.font,
+                                                                 globalState.currentEditSession.viewPort.x, y)
+            let absoluteGridX = max(0, baseGridX + relativeGridX)
+            let absoluteCanonicalX = session.textBuffer.gridXToCanonicalX(globalState.globalStyle.font,
+                                                                          absoluteGridX,
+                                                                          y)
+            x = max(0, min(globalState.currentEditSession.textBuffer.getLineLength(y), absoluteCanonicalX))
+          x = min(x, globalState.currentEditSession.textBuffer.getLineOfRune(y).len)
           if selectionInitiated:
             if globalState.currentEditSession.selection.first.x != x or globalState.currentEditSession.selection.first.y != y:
               globalState.currentEditSession.selectionInEffect = true
@@ -259,10 +255,9 @@ proc main(): int =
                 shouldRefresh = true
             
         of sdl2.KeyDown:
-          let modState = sdl2.getModState()
-          if (modState and KMOD_CTRL).bool: setCtrl()
-          if (modState and KMOD_ALT).bool: setAlt()
           let shifting = (sdl2.getModState() and KMOD_SHIFT).bool
+          let ctrl = (sdl2.getModState() and KMOD_CTRL).bool
+          let alt = (sdl2.getModState() and KMOD_ALT).bool
           case event.key.keysym.scancode:
             of SDL_SCANCODE_HOME:
               let targetY = globalState.currentEditSession.cursor.y
@@ -370,28 +365,28 @@ proc main(): int =
                 globalState.currentEditSession.cursorUp()
 
             of SDL_SCANCODE_DOWN:
-              if globalState.currentEditSession.cursor.y == globalState.currentEditSession.textBuffer.lineCount(): break
-              if shifting:
-                let targetY = if globalState.currentEditSession.cursor.y < globalState.currentEditSession.textBuffer.lineCount(): globalState.currentEditSession.cursor.y+1 else: globalState.currentEditSession.textBuffer.lineCount().cint
-                let targetX = (
-                  if targetY < globalState.currentEditSession.textBuffer.lineCount().cint:
-                    min(globalState.currentEditSession.cursor.expectingX, globalState.currentEditSession.textBuffer.getLineLength(targetY))
-                  else:
-                    0
-                )
-                if targetX != globalState.currentEditSession.cursor.x or targetY != globalState.currentEditSession.cursor.y:
-                  if not globalState.currentEditSession.selectionInEffect:
-                    globalState.currentEditSession.startSelection(globalState.currentEditSession.cursor.x, globalState.currentEditSession.cursor.y)
-                  globalState.currentEditSession.setSelectionLastPoint(targetX.cint, targetY.cint)
-                  globalState.currentEditSession.cursor.y = targetY.cint
-                  globalState.currentEditSession.cursor.x = targetX.cint
-                  globalState.currentEditSession.syncViewPort()
-                  shouldRefresh = true
-              else:
-                if globalState.currentEditSession.selectionInEffect:
-                  globalState.currentEditSession.invalidateSelectedState()
-                  shouldRefresh = true
-                globalState.currentEditSession.cursorDown()
+              if not (globalState.currentEditSession.cursor.y > globalState.currentEditSession.textBuffer.lineCount()):
+                if shifting:
+                  let targetY = if globalState.currentEditSession.cursor.y < globalState.currentEditSession.textBuffer.lineCount(): globalState.currentEditSession.cursor.y+1 else: globalState.currentEditSession.textBuffer.lineCount().cint
+                  let targetX = (
+                    if targetY < globalState.currentEditSession.textBuffer.lineCount().cint:
+                      min(globalState.currentEditSession.cursor.expectingX, globalState.currentEditSession.textBuffer.getLineLength(targetY))
+                    else:
+                      0
+                  )
+                  if targetX != globalState.currentEditSession.cursor.x or targetY != globalState.currentEditSession.cursor.y:
+                    if not globalState.currentEditSession.selectionInEffect:
+                      globalState.currentEditSession.startSelection(globalState.currentEditSession.cursor.x, globalState.currentEditSession.cursor.y)
+                    globalState.currentEditSession.setSelectionLastPoint(targetX.cint, targetY.cint)
+                    globalState.currentEditSession.cursor.y = targetY.cint
+                    globalState.currentEditSession.cursor.x = targetX.cint
+                    globalState.currentEditSession.syncViewPort()
+                    shouldRefresh = true
+                else:
+                  if globalState.currentEditSession.selectionInEffect:
+                    globalState.currentEditSession.invalidateSelectedState()
+                    shouldRefresh = true
+                  globalState.currentEditSession.cursorDown()
 
             of SDL_SCANCODE_LEFT:
               if shifting:
@@ -465,12 +460,15 @@ proc main(): int =
                 globalState.currentEditSession.syncViewPort()
                 shouldRefresh = true
               else:
-                let alt = (modState and KMOD_ALT).bool
+
                 if alt and ctrl:
                   case k:
                     of 's'.ord:
                       # save-as.
                       discard nil
+                    of '/'.ord:
+                      # redo.
+                      globalState.currentEditSession.undoRedoStack.redo(globalState.currentEditSession.textBuffer)
                     else:
                       discard nil
                       
@@ -478,17 +476,20 @@ proc main(): int =
                   case k:
                     of 'w'.ord:
                       # copy.
-                      if not globalState.currentEditSession.selectionInEffect:
-                        break
-                      let start = min(globalState.currentEditSession.selection.first, globalState.currentEditSession.selection.last)
-                      let last = max(globalState.currentEditSession.selection.first, globalState.currentEditSession.selection.last)
-                      let data = globalState.currentEditSession.textBuffer.getRangeString(start, last).cstring
-                      discard sdl2.setClipboardText(data)
-                      globalState.currentEditSession.invalidateSelectedState()
+                      if globalState.currentEditSession.selectionInEffect:
+                        let start = min(globalState.currentEditSession.selection.first, globalState.currentEditSession.selection.last)
+                        let last = max(globalState.currentEditSession.selection.first, globalState.currentEditSession.selection.last)
+                        let data = globalState.currentEditSession.textBuffer.getRangeString(start, last).cstring
+                        discard sdl2.setClipboardText(data)
+                        globalState.currentEditSession.invalidateSelectedState()
                     else:
-                      discard nil 
+                      discard
+
                 elif ctrl and not alt:
                   case k:
+                    of '/'.ord:
+                      # undo.
+                      globalState.currentEditSession.undoRedoStack.undo(globalState.currentEditSession.textBuffer)
                     of 'p'.ord:
                       # previous line.
                       globalState.currentEditSession.cursorUp()
@@ -504,15 +505,17 @@ proc main(): int =
                     of 'w'.ord:
                       # cut
                       if not globalState.currentEditSession.selectionInEffect:
-                        break
-                      let start = min(globalState.currentEditSession.selection.first, globalState.currentEditSession.selection.last)
-                      let last = max(globalState.currentEditSession.selection.first, globalState.currentEditSession.selection.last)
-                      let data = globalState.currentEditSession.textBuffer.getRangeString(start, last).cstring
-                      discard sdl2.setClipboardText(data)
-                      globalState.currentEditSession.textBuffer.delete(start, last)
-                      globalState.currentEditSession.invalidateSelectedState()
-                      globalState.currentEditSession.resetCurrentCursor()
-                      globalState.currentEditSession.syncViewPort()
+                        discard nil
+                      else:
+                        let start = min(globalState.currentEditSession.selection.first, globalState.currentEditSession.selection.last)
+                        let last = max(globalState.currentEditSession.selection.first, globalState.currentEditSession.selection.last)
+                        let data = globalState.currentEditSession.textBuffer.getRange(start, last)
+                        globalState.currentEditSession.recordDeleteAction(start, data)
+                        discard sdl2.setClipboardText(($data).cstring)
+                        globalState.currentEditSession.textBuffer.delete(start, last)
+                        globalState.currentEditSession.invalidateSelectedState()
+                        globalState.currentEditSession.resetCurrentCursor()
+                        globalState.currentEditSession.syncViewPort()
                     of 'y'.ord:
                       # paste.
                       let s = $getClipboardText()
@@ -550,24 +553,18 @@ proc main(): int =
                     else:
                       discard nil
                 else:
-                  echo "#"
+                  discard nil
                         
           shouldRefresh = true
-        of sdl2.KeyUp:
-          if not (sdl2.getModState() and sdl2.KMOD_CTRL).bool:
-            unsetCtrl()
-            shouldRefresh = true
-          if not (sdl2.getModState() and sdl2.KMOD_ALT).bool:
-            unsetAlt()
-            shouldRefresh = true
-          
         else:
-          discard    
-          
+          discard
+
+    # echo $globalState.currentEditSession.undoRedoStack
+        
     cursorBlinkTimer.check()
     if not shouldRefresh: continue
 
-    echo "re-render"
+    # echo "re-render"
     
     # render screen here.
     renderer.setDrawColor(globalState.globalStyle.backgroundColor.r,
@@ -581,12 +578,8 @@ proc main(): int =
     if cursorBlinkTimer.paused or cursorBlinkTimer.stopped:
       renderer.render(cursorView, flat=true)
     
-
-    
-
     renderer.present()
 
-  
   renderer.destroy()
   window.destroyWindow()
   sdl2.quit()

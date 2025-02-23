@@ -45,7 +45,6 @@ proc render*(renderer: RendererPtr, lnp: LineNumberPanel): void =
   let rightBorderX = (baselineX + lnpTargetWidth*st.gridSize.w).cint
   # right border (end of number)
   let lnRightBorder = rightBorderX - 2*st.gridSize.w
-  echo "bor ", renderRowBound, " ", digitCount(renderRowBound)
   # render line number
   for i in session.viewPort.y..<renderRowBound:
     let lnStr = ($(i+1))
@@ -86,7 +85,7 @@ proc render*(renderer: RendererPtr, lnp: LineNumberPanel): void =
   if renderRowBound >= session.textBuffer.lineCount():
     discard st.globalStyle.font.renderUTF8Blended(
       "*", renderer, nil,
-      lnRightBorder,
+      lnRightBorder - 1 * st.gridSize.w,
       ((lnp.offsetY+(renderRowBound-st.currentEditSession.viewPort.y))*st.gridSize.h).cint,
       false
     )

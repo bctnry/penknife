@@ -131,7 +131,9 @@ proc insert*(tb: TextBuffer, l: int, c: int, ch: char): tuple[dline: int, dcol: 
 proc insert*(tb: TextBuffer, l: int, c: int, s: string): tuple[dline: int, dcol: int] =
   tb.dirty = true
   let (line, col) = tb.resolvePosition(l, c)
+  echo "l ", l, " c ", c, " line ", line, " col ", col, " lc ", tb.lineCount(), " s ", s
   if line >= tb.lineCount():
+    echo "v"
     let ll = s.split("\n")
     for k in ll:
       tb.lineList.add(k.toRunes)
@@ -145,23 +147,32 @@ proc insert*(tb: TextBuffer, l: int, c: int, s: string): tuple[dline: int, dcol:
       of 0:
         return (dline: 0, dcol: 0)
       of 1:
-        tb.lineList[line] = theLine[0..<c] & newLines[0] & theLine[c..<theLine.len]
+        tb.lineList[line] = theLine[0..<col] & newLines[0] & theLine[col..<theLine.len]
         return (dline: 0, dcol: newLines[0].len)
       of 2:
-        tb.lineList[line] &= newLines[0]
+        tb.lineList[line] = theLine[0..<col] & newLines[0] & theLine[col..<theLine.len]
         if line == tb.lineCount()-1:
           tb.lineList.add(newLines[1])
         else:
-          tb.lineList[line+1] &= newLines[1]
+          tb.lineList[line+1] = newLines[1] & tb.lineList[line+1]
         return (dline: 1, dcol: newLines[1].len)
       else:
-        tb.lineList[line] &= newLines[0]
-        tb.lineList.insert(newLines[1..<newLines.len-1], line+1)
-        let lastLineY = (line+1+newLines.len-2)
-        tb.lineList[lastLineY] = newLines[^1] & tb.lineList[lastLineY]
-        # we should be safe when the code for handling case when `newLine.len`
-        # is 0 is technically wrong.
+        tb.lineList[line] = theLine[0..<col] & newLines[0] & theLine[col..<theLine.len]
+        if line+1 >= tb.lineCount():
+          for k in newLines[1..^1]:
+            tb.lineList.add(k)
+        else:
+          tb.lineList.insert(newLines[1..<newLines.len-1], line+1)
+          let lastLineY = (line+1+newLines.len-2)
+          tb.lineList[lastLineY] = newLines[^1] & tb.lineList[lastLineY]
+          # we should be safe when the code for handling case when `newLine.len`
+          # is 0 is technically wrong.
         return (dline: newLines.len-1, dcol: newLines[^1].len)
+
+proc insert*(tb: TextBuffer, l: int, c: int, s: seq[Rune]): tuple[dline: int, dcol: int] =
+  # TODO: find a better way to do all of this.
+  let ss = $s
+  return tb.insert(l, c, ss)
     
 proc resolvePosition*(tb: TextBuffer, line: int, col: int): tuple[line: int, col: int] =#
   ## Return value ranges from (0, 0) to (tb.lineCount(), 0)

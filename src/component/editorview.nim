@@ -38,7 +38,6 @@ proc render*(renderer: RendererPtr, ev: EditorView): void =
   let ss = st.currentEditSession
   let baselineX = (ev.offsetX*st.gridSize.w).cint
   let offsetPY = (ev.offsetY*st.gridSize.h).cint
-  echo "b ", baselineX, " ", offsetPY
   # render edit viewport
   let renderRowBound = min(ss.viewPort.y+ev.height, min(ss.viewPort.y+ss.viewPort.h, ss.textBuffer.lineCount()))
   let selectionRangeStart = min(ss.selection.first, ss.selection.last)

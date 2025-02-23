@@ -1,7 +1,9 @@
+import std/unicode
 import cursor
 import textbuffer
 import selection
 import viewport
+import undoredo
 
 # the gap between the linenumber panel and the viewport. (grid)
 const VIEWPORT_GAP*: cint = 2
@@ -15,6 +17,7 @@ type
     selection*: LinearSelection
     selectionInEffect*: bool
     cursor*: Cursor
+    undoRedoStack*: UndoRedoStack
 
 proc mkEditSession*(): EditSession =
   return EditSession(
@@ -25,7 +28,8 @@ proc mkEditSession*(): EditSession =
       first: Cursor(x: 0, y: 0, expectingX: 0),
       last: Cursor(x: 0, y: 0, expectingX: 0)
     ),
-    selectionInEffect: false
+    selectionInEffect: false,
+    undoRedoStack: mkUndoRedoStack()
   )
 
 proc syncViewPort*(st: EditSession): void =
@@ -163,4 +167,50 @@ proc gotoLineEnd*(st: EditSession): void =
     st.cursor.expectingX = st.cursor.x
     st.syncViewPort()
 
+proc undo(tb: TextBuffer, ur: UndoRedoPiece): void =
+  case ur.kind:
+    of UR_DELETE:
+      discard tb.insert(ur.postPosition.y, ur.postPosition.x, ur.data)
+    of UR_INSERT:
+      let start = ur.postPosition
+      let last = ur.postPosition.advanceWith(ur.data)
+      tb.delete(start, last)
 
+proc redo(tb: TextBuffer, ur: UndoRedoPiece): void =
+  case ur.kind:
+    of UR_DELETE:
+      let start = ur.postPosition
+      let last = ur.postPosition.advanceWith(ur.data)
+      tb.delete(start, last)
+    of UR_INSERT:
+      discard tb.insert(ur.postPosition.y, ur.postPosition.x, ur.data)
+    
+proc undo*(stk: UndoRedoStack, tb: TextBuffer): void =
+  if stk.i < 0: return
+  let p = stk.pieces[stk.i]
+  tb.undo(p)
+  stk.i -= 1
+
+proc redo*(stk: UndoRedoStack, tb: TextBuffer): void =
+  if stk.i < 0: return
+  let p = stk.pieces[stk.i]
+  tb.redo(p)
+  stk.i -= 1
+    
+proc recordInsertAction*(es: EditSession, position: Cursor, data: seq[Rune]): void =
+  let stk = es.undoRedoStack
+  if stk.i < stk.pieces.len-1:
+    for _ in 0..<stk.pieces.len-1 - stk.i:
+      discard stk.pieces.pop()
+  stk.pieces.add(UndoRedoPiece(kind: UR_INSERT, postPosition: position, data: data))
+  stk.i = stk.pieces.len-1
+
+proc recordDeleteAction*(es: EditSession, position: Cursor, data: seq[Rune]): void =
+  let stk = es.undoRedoStack
+  if stk.i < stk.pieces.len-1:
+    for _ in 0..<stk.pieces.len-1 - stk.i:
+      discard stk.pieces.pop()
+  stk.pieces.add(UndoRedoPiece(kind: UR_DELETE, postPosition: position, data: data))
+  stk.i = stk.pieces.len-1
+  
+    
