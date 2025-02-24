@@ -496,6 +496,12 @@ proc main(): int =
                     of 'n'.ord:
                       # next line.
                       globalState.currentEditSession.cursorDown()
+                    of 'b'.ord:
+                      # back 1 char.
+                      globalState.currentEditSession.cursorLeft()
+                    of 'f'.ord:
+                      # back 1 char.
+                      globalState.currentEditSession.cursorRight()
                     of 'a'.ord:
                       # home.
                       globalState.currentEditSession.gotoLineStart()

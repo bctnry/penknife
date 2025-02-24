@@ -131,9 +131,7 @@ proc insert*(tb: TextBuffer, l: int, c: int, ch: char): tuple[dline: int, dcol: 
 proc insert*(tb: TextBuffer, l: int, c: int, s: string): tuple[dline: int, dcol: int] =
   tb.dirty = true
   let (line, col) = tb.resolvePosition(l, c)
-  echo "l ", l, " c ", c, " line ", line, " col ", col, " lc ", tb.lineCount(), " s ", s
   if line >= tb.lineCount():
-    echo "v"
     let ll = s.split("\n")
     for k in ll:
       tb.lineList.add(k.toRunes)
@@ -150,18 +148,22 @@ proc insert*(tb: TextBuffer, l: int, c: int, s: string): tuple[dline: int, dcol:
         tb.lineList[line] = theLine[0..<col] & newLines[0] & theLine[col..<theLine.len]
         return (dline: 0, dcol: newLines[0].len)
       of 2:
-        tb.lineList[line] = theLine[0..<col] & newLines[0] & theLine[col..<theLine.len]
+        tb.lineList[line] = theLine[0..<col] & newLines[0]
         if line == tb.lineCount()-1:
-          tb.lineList.add(newLines[1])
+          tb.lineList.add(newLines[1] & theLine[col..<theLine.len])
         else:
-          tb.lineList[line+1] = newLines[1] & tb.lineList[line+1]
+          let oldLine = tb.lineList[line+1]
+          tb.lineList[line+1] = newLines[1] & theLine[col..<theLine.len]
+          tb.lineList.insert(oldLine, line+2)
         return (dline: 1, dcol: newLines[1].len)
       else:
-        tb.lineList[line] = theLine[0..<col] & newLines[0] & theLine[col..<theLine.len]
+        tb.lineList[line] = theLine[0..<col] & newLines[0]
         if line+1 >= tb.lineCount():
           for k in newLines[1..^1]:
             tb.lineList.add(k)
+          tb.lineList.add(theLine[col..<theLine.len])
         else:
+          newLines[newLines.len-1] &= theLine[col..<theLine.len]
           tb.lineList.insert(newLines[1..<newLines.len-1], line+1)
           let lastLineY = (line+1+newLines.len-2)
           tb.lineList[lastLineY] = newLines[^1] & tb.lineList[lastLineY]
@@ -281,32 +283,38 @@ proc delete*(tb: TextBuffer, start: Cursor, last: Cursor): void =
       if lastCol < lastSeqLen:
         tb.lineList[startLine] &= tb.lineList[lastLine][lastCol..<lastSeqLen]
     if lastLine < tb.lineCount():
+      # when `startLine+1 == lastLine` (i.e. the range spans over 2 lines) the
+      # line below covers this case since deleting `startLine+1..lastLine` would
+      # delete `startLine+1` which is the same as `lastLine`. this is different
+      # in the case when `lastLine >= tb.lineCount()`, however; since we can't
+      # delete the line at `lastLine` (which in this case would be the same as
+      # `tb.lineCount()` which would be outside of the actual data range) we
+      # have to delete `..<lastLine` which would be invalid when there is only
+      # two lines (i.e. `startLine+1 == lastLine`.
       tb.lineList.delete(startLine+1..lastLine)
     else:
-      tb.lineList.delete(startLine+1..<lastLine)
+      if startLine+1 < lastLine:
+        tb.lineList.delete(startLine+1..<lastLine)
 
 proc getRange*(tb: TextBuffer, start: Cursor, last: Cursor): seq[Rune] =
   let (startLine, startCol) = tb.resolvePosition(start)
   let (lastLine, lastCol) = tb.resolvePosition(last)
   if startLine == lastLine:
     return tb.lineList[startLine][startCol..<lastCol]
-  else:
-    var res: seq[Rune] = @[]
-    let startSeq = tb.getLineOfRune(startLine)
-    if startSeq.len > 0:
-      res &= startSeq[startCol..<startSeq.len]
-    var i = startLine + 1
-    if i < tb.lineCount() and i < lastLine:
+  var res: seq[Rune] = @[]
+  let startSeq = tb.getLineOfRune(startLine)
+  if startSeq.len > 0:
+    res &= startSeq[startCol..<startSeq.len]
+  var i = startLine + 1
+  if i < tb.lineCount() and i < lastLine:
+    res.add("\n".runeAt(0))
+    while i < tb.lineCount() and i < lastLine:
+      res &= tb.getLineOfRune(i)
       res.add("\n".runeAt(0))
-      while i < tb.lineCount() and i < lastLine:
-        res &= tb.getLineOfRune(i)
-        res.add("\n".runeAt(0))
-        i += 1
-    if lastLine < tb.lineCount():
-      res.add("\n".runeAt(0))
-      if lastCol > 0:
-        res &= tb.getLineOfRune(lastLine)[0..<lastCol]
-    return res
+      i += 1
+  if lastLine < tb.lineCount():
+    res &= tb.getLineOfRune(lastLine)[0..<lastCol]
+  return res
     
 proc getRangeString*(tb: TextBuffer, start: Cursor, last: Cursor): string =
   return $tb.getRange(start, last)
