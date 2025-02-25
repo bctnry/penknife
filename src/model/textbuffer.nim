@@ -157,19 +157,19 @@ proc insert*(tb: TextBuffer, l: int, c: int, s: string): tuple[dline: int, dcol:
           tb.lineList.insert(oldLine, line+2)
         return (dline: 1, dcol: newLines[1].len)
       else:
+        let dcol = newLines[^1].len
         tb.lineList[line] = theLine[0..<col] & newLines[0]
         if line+1 >= tb.lineCount():
           for k in newLines[1..^1]:
             tb.lineList.add(k)
-          tb.lineList.add(theLine[col..<theLine.len])
+          tb.lineList[^1] &= theLine[col..<theLine.len]
         else:
+          let oldcol = newLines[newLines.len-1].len
           newLines[newLines.len-1] &= theLine[col..<theLine.len]
-          tb.lineList.insert(newLines[1..<newLines.len-1], line+1)
-          let lastLineY = (line+1+newLines.len-2)
-          tb.lineList[lastLineY] = newLines[^1] & tb.lineList[lastLineY]
+          tb.lineList.insert(newLines[1..<newLines.len], line+1)
           # we should be safe when the code for handling case when `newLine.len`
           # is 0 is technically wrong.
-        return (dline: newLines.len-1, dcol: newLines[^1].len)
+        return (dline: newLines.len-1, dcol: dcol)
 
 proc insert*(tb: TextBuffer, l: int, c: int, s: seq[Rune]): tuple[dline: int, dcol: int] =
   # TODO: find a better way to do all of this.
@@ -305,15 +305,17 @@ proc getRange*(tb: TextBuffer, start: Cursor, last: Cursor): seq[Rune] =
   let startSeq = tb.getLineOfRune(startLine)
   if startSeq.len > 0:
     res &= startSeq[startCol..<startSeq.len]
+  res.add("\n".runeAt(0))
   var i = startLine + 1
   if i < tb.lineCount() and i < lastLine:
-    res.add("\n".runeAt(0))
     while i < tb.lineCount() and i < lastLine:
       res &= tb.getLineOfRune(i)
       res.add("\n".runeAt(0))
       i += 1
   if lastLine < tb.lineCount():
     res &= tb.getLineOfRune(lastLine)[0..<lastCol]
+  else:
+    discard res.pop()
   return res
     
 proc getRangeString*(tb: TextBuffer, start: Cursor, last: Cursor): string =
