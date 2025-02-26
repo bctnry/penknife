@@ -1,6 +1,7 @@
 import textbuffer
 import editsession
 import style
+import keyseq
 import ../ui/tvfont
 
   
@@ -12,6 +13,7 @@ type
     currentEditSession*: EditSession
     gridSize*: GridSizeDescriptor
     globalStyle*: Style
+    keyMap*: FKeyMap
 
 proc globalFont*(s: State): TVFont {.inline.} =
   return s.globalStyle.font
@@ -19,7 +21,8 @@ proc globalFont*(s: State): TVFont {.inline.} =
 proc mkNewState*(): State =
   State(currentEditSession: mkEditSession(),
         gridSize: GridSizeDescriptor(w: 0, h: 0),
-        globalStyle: mkStyle()
+        globalStyle: mkStyle(),
+        keyMap: mkFKeyMap()
   )
 
 proc loadText*(st: State, s: string, name: string = "*unnamed*", fullPath: string = ""): void =

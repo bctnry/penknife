@@ -122,9 +122,6 @@ proc insert*(tb: TextBuffer, l: int, c: int, ch: char): tuple[dline: int, dcol: 
       # we follow emacs's behaviour here: adding a character at the end of a
       # document creates a new line.
       tb.lineList.add("".toRunes)
-    let origText = tb.getLineOfRune(line)
-    let leftPart = origText[0..<col]
-    let rightPart = origText[col..<origText.len]
     tb.lineList[line].insert(ch.Rune, col)
     return (dline: 0, dcol: 1)
 

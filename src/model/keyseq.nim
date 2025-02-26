@@ -1,61 +1,92 @@
-import std/tables
+import std/[tables, options]
 import sdl2
-# NOTE: this directly uses sdl2's scancode definitions.
+import editsession
+import style
 
 type
-  FKey* = tuple[ctrl: bool, alt: bool, scancode: sdl2.Scancode]
-  FKeyCallback* = proc (): void
+  FKeyDescriptor = string
+  StateInterface* = ref object
+    currentEditSession*: proc (): EditSession
+    globalStyle*: proc (): Style
+  FKeyCallback* = proc (stateInterface: StateInterface): void
+  FKeyMapNodeType* = enum
+    FKEYMAP_SUBMAP
+    FKEYMAP_CALLBACK
+  FKeyMapNode* = ref object
+    case kind*: FKeyMapNodeType
+    of FKEYMAP_CALLBACK:
+      cValue*: FKeyCallback
+    of FKEYMAP_SUBMAP:
+      nMap*: TableRef[FKeyDescriptor, FKeyMapNode]
   FKeyMap* = ref object
-    ctrlOnly*: TableRef[cint, FKeyCallback]
-    altOnly*: TableRef[cint, FKeyCallback]
-    ctrlAlt*: TableRef[cint, FKeyCallback]
+    nMap*: TableRef[FKeyDescriptor, FKeyMapNode]
 
 proc mkFKeyMap*(): FKeyMap =
   return FKeyMap(
-    ctrlOnly: newTable[cint, FKeyCallback](),
-    altOnly: newTable[cint, FKeyCallback](),
-    ctrlAlt: newTable[cint, FKeyCallback]()
+    nMap: newTable[FKeyDescriptor, FKeyMapNode]()
   )
 
 # the key descriptor comes in the following format:
-#     C[key] - Ctrl + [key]
-#     M[key] - Meta + [key]
-#     CM[key] - Ctrl + Meta + [key]
-# e.g. Ctrl+s is Cs, Ctrl+Meta+k is CMk
-# this might be confusing but there's no [].
-#     Ctrl+C is CC
-#     Ctrl+M is CM (CM couldn't be Ctrl+Meta because that's not
-#                   a full key combo)
-#     Meta+C is MC (and not CM)
-#     Meta+M is MM
-proc keyToString*(fk: FKey): string =
-  var res: string = ""
-  if fk.ctrl: res &= "C"
-  if fk.alt: res &= "M"
-  res &= fk.scancode.getScancodeName()
-  return res
+#     [C][M][S]-[key] - Ctrl/Meta/Shift + [key]
+# e.g. Ctrl+s is C-s, Ctrl+Meta+k is CM-k, Ctrl+Meta+Shift+Up is CMS-<up>
+# this might be confusing but there's no .
+#     Ctrl+C is C-c
+#     Ctrl+M is C-M
+#     Meta+C is M-C
+#     Meta+M is M-M
+#     Ctrl+Shift+C is C-C
+# [key] could be any printable characters that is not white space or:
+#     <up>  - up arrow
+#     <left>  - left arrow
+#     <down>  - down arrow
+#     <right>  - right arrow
+#     <pgup>  - page up
+#     <pgdn>  - page down
+#     <home>  - home
+#     <end>   - end
+#     <ins>   - insert
+#     <f1> ~ <f12>   - F1 ~ F12
+#     <tab>   - tab
+#     <backspc>    - back space
+#     <esc>   - escape
 
-proc registerKeyProcedure*(fkm: var FKeyMap, fk: FKey, callback: proc (): void): void =
-  var m = (if fk.ctrl and fk.alt:
-             fkm.ctrlAlt
-           elif fk.ctrl:
-             fkm.ctrlOnly
-           elif fk.alt:
-             fkm.altOnly
-           else:
-             raise newException(ValueError, "command key must have a prefix"))
-  m[fk[2].cint] = callback
+proc registerFKeyCallback*(fkm: FKeyMap, kseq: seq[FKeyDescriptor], callback: FKeyCallback): bool =
+  var i = 0
+  var subj = fkm.nMap
+  while i < kseq.len:
+    let p = kseq[i]
+    if not subj.hasKey(p):
+      if i == kseq.len-1:
+        subj[p] = FKeyMapNode(kind: FKEYMAP_CALLBACK, cValue: callback)
+      else:
+        let newSubmap = newTable[FKeyDescriptor, FKeyMapNode]()
+        subj[p] = FKeyMapNode(kind: FKEYMAP_SUBMAP, nMap: newSubmap)
+        subj = newSubmap
+    elif i == kseq.len-1:
+      if subj[p].kind == FKEYMAP_CALLBACK:
+        subj[p].cValue = callback
+      else:
+        return false
+    else:
+      let newSubmap = newTable[FKeyDescriptor, FKeyMapNode]()
+      subj[p] = FKeyMapNode(kind: FKEYMAP_SUBMAP, nMap: newSubmap)
+      subj = newSubmap
+    i += 1
+  return true
 
-proc call*(fkm: var FKeymap, ctrl: bool, alt: bool, scancode: sdl2.Scancode): void =
-  var m = (if ctrl and alt:
-             fkm.ctrlAlt
-           elif ctrl:
-             fkm.ctrlOnly
-           elif alt:
-             fkm.altOnly
-           else:
-             raise newException(ValueError, "command key must have a prefix"))
-  m[scancode.cint]()
-  
-  
+proc resolve*(fkm: FKeyMap, kd: FKeyDescriptor): Option[FKeyMapNode] =
+  if not fkm.nMap.hasKey(kd): return none(FKeyMapNode)
+  else: return some(fkm.nMap[kd])
+
+proc resolve*(fkmn: FKeyMapNode, kd: FKeyDescriptor): Option[FKeyMapNode] =
+  case fkmn.kind:
+    of FKEYMAP_SUBMAP:
+      if not fkmn.nMap.hasKey(kd): return none(FKeyMapNode)
+      else: return some(fkmn.nMap[kd])
+    else:
+      return none(FKeyMapNode)
+
+proc resolve*(fkmn: Option[FKeyMapNode], kd: FKeyDescriptor): Option[FKeyMapNode] =
+  if fkmn.isNone(): return none(FKeyMapNode)
+  return fkmn.get.resolve(kd)
   

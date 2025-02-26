@@ -4,7 +4,7 @@ import std/paths
 import std/unicode
 import sdl2
 import sdl2/ttf
-import model/[textbuffer, editsession, state, cursor, undoredo]
+import model/[textbuffer, editsession, state, cursor, undoredo, keyseq]
 import ui/[tvfont, timer]
 import component/[cursorview, editorview, editorframe]
 import config
