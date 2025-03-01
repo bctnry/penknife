@@ -4,7 +4,7 @@ import std/paths
 import std/unicode
 import sdl2
 import sdl2/ttf
-import model/[textbuffer, editsession, state, cursor, undoredo, keyseq]
+import model/[textbuffer, editsession, state, cursor, undoredo, keyseq, style]
 import ui/[tvfont, timer]
 import component/[cursorview, editorview, editorframe]
 import config
@@ -50,6 +50,14 @@ proc main(): int =
   globalState.globalStyle.highlightColor.loadColorFromString(getGlobalConfig(CONFIG_HIGHLIGHT_COLOR))
   globalState.globalStyle.font.useNewMainColor(globalState.globalStyle.mainColor)
   globalState.globalStyle.font.useNewAuxColor(globalState.globalStyle.auxColor)
+
+  globalState.keySession.stateInterface = StateInterface(
+    currentEditSession: proc (): EditSession = return globalState.currentEditSession,
+    globalStyle: proc(): Style = return globalState.globalStyle
+  )
+  globalState.keySession.root = globalState.keyMap.nMap
+
+                                          
 
   # create 
   window = sdl2.createWindow("penknife".cstring,
@@ -105,6 +113,390 @@ proc main(): int =
   ), 1000)
   # cursorBlinkTimer.start()
 
+  let HomeCallback = (
+    proc (si: StateInterface): void =
+      let session = si.currentEditSession()
+      if session.selectionInEffect:
+        session.invalidateSelectedState()
+      session.gotoLineStart()
+      shouldRefresh = true
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["<home>"],
+    HomeCallback
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["C-a"],
+    HomeCallback
+  )
+  
+  let ShiftHomeCallback = (
+    proc (si: StateInterface): void =
+      let session = si.currentEditSession()
+      let targetY = session.cursor.y
+      let targetX = 0
+      if session.cursor.x != targetX or session.cursor.y != targetY:
+        if not session.selectionInEffect:
+          session.startSelection(session.cursor.x, session.cursor.y)
+        session.setSelectionLastPoint(targetX, targetY)
+        session.cursor.x = targetX.cint
+        session.cursor.y = targetY.cint
+        session.syncViewPort()
+        shouldRefresh = true
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["S-<home>"],
+    ShiftHomeCallback
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["CS-a"],
+    ShiftHomeCallback
+  )
+  
+  let EndCallback = (
+    proc (si: StateInterface): void =
+      let session = si.currentEditSession()
+      let targetY = session.cursor.y
+      let targetX = if targetY >= session.textBuffer.lineCount(): 0 else: session.textBuffer.getLineLength(targetY)
+      if session.selectionInEffect:
+        session.invalidateSelectedState()
+        shouldRefresh = true
+      session.gotoLineEnd()
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["<end>"],
+    EndCallback
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["C-e"],
+    EndCallback
+  )
+
+  let ShiftEndCallback = (
+    proc (si: StateInterface): void =
+      let session = si.currentEditSession()
+      let targetY = session.cursor.y
+      let targetX = if targetY >= session.textBuffer.lineCount(): 0 else: session.textBuffer.getLineLength(targetY)
+      if session.cursor.x != targetX or session.cursor.y != targetY:
+        if not session.selectionInEffect:
+          session.startSelection(session.cursor.x, session.cursor.y)
+        session.setSelectionLastPoint(targetX, targetY)
+        session.cursor.x = targetX.cint
+        session.cursor.y = targetY.cint
+        session.syncViewPort()
+        shouldRefresh = true
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["S-<end>"],
+    ShiftEndCallback
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["CS-e"],
+    ShiftEndCallback
+  )
+  
+  discard globalState.keyMap.registerFKeyCallback(
+    @["M-w"],
+    proc (si: StateInterface): void =
+      let session = si.currentEditSession()
+      if session.selectionInEffect:
+        let start = min(session.selection.first, session.selection.last)
+        let last = max(session.selection.first, session.selection.last)
+        let data = session.textBuffer.getRangeString(start, last).cstring
+        discard sdl2.setClipboardText(data)
+        session.invalidateSelectedState()
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["<del>"],
+    proc (si: StateInterface): void =
+      let session = si.currentEditSession()
+      if session.selectionInEffect:
+        let start = min(session.selection.first, session.selection.last)
+        let last = max(session.selection.last, session.selection.first)
+        session.textBuffer.delete(start, last)
+        session.setCursor(start.y, start.x)
+      else:
+        session.textBuffer.deleteChar(session.cursor.y, session.cursor.x)
+      session.invalidateSelectedState()
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["<backspace>"],
+    proc (si: StateInterface): void =
+      let session = si.currentEditSession()
+      # When there's selection we delete the selection (and set the cursor
+      # at the start of the selection, which we will save beforehand).
+      if session.selectionInEffect:
+        let start = min(session.selection.first, session.selection.last)
+        let last = max(session.selection.last, session.selection.first)
+        session.textBuffer.delete(start, last)
+        session.setCursor(start.y, start.x)
+      else:
+        # When there's no selection:
+        #   We back up current cursor position for backspacing
+        #   Then we update cursor
+        #   And then we backspace at the saved position
+        # This is written this way because it's easy to consider
+        # text buffer and cursor as two independent thing and
+        # update them separately.
+        # When there's selection we just delete the selection.
+        # NOTE: (lineCount, 0) is treated as the same as (lineCount-1,
+        #   session[lineCount-1].len).
+        var deleteY = session.cursor.y
+        var deleteX = session.cursor.x
+        if deleteY >= session.textBuffer.lineCount():
+          deleteY -= 1
+          deleteX = session.textBuffer.getLineLength(deleteY).cint
+          session.cursor.y -= 1
+          session.cursor.x = session.textBuffer.getLineLength(deleteY).cint
+        if deleteX == 0:
+          if deleteY > 0:
+            session.cursor.y -= 1
+            session.cursor.x = session.textBuffer.getLineLength(session.cursor.y).cint
+        else:
+          session.cursor.x -= 1
+        session.textBuffer.backspaceChar(deleteY, deleteX)
+      session.syncViewPort()
+      session.invalidateSelectedState()
+  )
+  
+  let UpCallback = (
+    proc (si: StateInterface): void =
+      let session = si.currentEditSession()
+      if session.selectionInEffect:
+        session.invalidateSelectedState()
+        shouldRefresh = true
+      session.cursorUp()
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["<up>"],
+    UpCallback
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["C-p"],
+    UpCallback
+  )
+  
+  let ShiftUpCallback = (
+    proc (si: StateInterface): void =
+      let session = si.currentEditSession()
+      let targetY = if session.cursor.y > 0: session.cursor.y-1 else: 0
+      let targetX = (
+        if session.cursor.y > 0:
+          min(session.cursor.expectingX, session.textBuffer.getLineLength(targetY))
+        else:
+          0
+      )
+      if targetX != session.cursor.x or targetY != session.cursor.y:
+        if not session.selectionInEffect:
+          session.startSelection(session.cursor.x, session.cursor.y)
+        session.setSelectionLastPoint(targetX.cint, targetY.cint)
+        session.cursor.y = targetY.cint
+        session.cursor.x = targetX.cint
+        session.syncViewPort()
+        shouldRefresh = true
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["S-<up>"],
+    ShiftUpCallback
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["CS-p"],
+    ShiftUpCallback
+  )
+
+  let DownCallback = (
+    proc (si: StateInterface): void =
+      let session = si.currentEditSession()
+      if session.selectionInEffect:
+        session.invalidateSelectedState()
+        shouldRefresh = true
+      session.cursorDown()
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["<down>"],
+    DownCallback
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["C-n"],
+    DownCallback
+  )
+
+  let ShiftDownCallback = (
+    proc (si: StateInterface): void =
+      let session = si.currentEditSession()
+      if not (session.cursor.y > session.textBuffer.lineCount()):
+        let targetY = (if session.cursor.y < session.textBuffer.lineCount():
+                         session.cursor.y+1
+                       else:
+                         session.textBuffer.lineCount().cint)
+        let targetX = (
+          if targetY < session.textBuffer.lineCount().cint:
+            min(session.cursor.expectingX, session.textBuffer.getLineLength(targetY))
+          else:
+            0
+        )
+        if targetX != session.cursor.x or targetY != session.cursor.y:
+          if not session.selectionInEffect:
+            session.startSelection(session.cursor.x, session.cursor.y)
+          session.setSelectionLastPoint(targetX.cint, targetY.cint)
+          session.cursor.y = targetY.cint
+          session.cursor.x = targetX.cint
+          session.syncViewPort()
+          shouldRefresh = true
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["S-<down>"],
+    ShiftDownCallback
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["CS-n"],
+    ShiftDownCallback
+  )
+
+  let LeftCallback = (
+    proc (si: StateInterface): void =
+      let session = si.currentEditSession()
+      if session.selectionInEffect:
+        session.invalidateSelectedState()
+        shouldRefresh = true
+      session.cursorLeft()
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["<left>"],
+    LeftCallback
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["C-b"],
+    LeftCallback
+  )
+
+  let ShiftLeftCallback = (
+    proc (si: StateInterface): void =
+      let session = si.currentEditSession()
+      let targetY = (if session.cursor.x > 0: session.cursor.y
+                     else: max(session.cursor.y-1, 0))
+      let targetX = (
+        if session.cursor.x > 0:
+          (session.cursor.x-1).cint
+        else:
+          if session.cursor.y == 0:
+            0
+          else:
+            session.textBuffer.getLineLength(session.cursor.y-1).cint
+      )
+      if targetX != session.cursor.x or targetY != session.cursor.y:
+        if not session.selectionInEffect:
+          session.startSelection(session.cursor.x, session.cursor.y)
+        session.setSelectionLastPoint(targetX.cint, targetY.cint)
+        session.cursor.y = targetY.cint
+        session.cursor.x = targetX.cint
+        session.syncViewPort()
+        shouldRefresh = true
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["S-<left>"],
+    ShiftLeftCallback
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["CS-b"],
+    ShiftLeftCallback
+  )
+
+  let RightCallback = (
+    proc (si: StateInterface): void =
+      let session = si.currentEditSession()
+      if not session.selectionInEffect:
+        session.invalidateSelectedState()
+        shouldRefresh = true
+      session.cursorRight()
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["<right>"],
+    RightCallback
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["C-f"],
+    RightCallback
+  )
+
+  let ShiftRightCallback = (
+    proc (si: StateInterface): void =
+      let session = si.currentEditSession()
+      let targetY = (
+        if session.cursor.y >= session.textBuffer.lineCount():
+          session.textBuffer.lineCount()
+        elif session.cursor.x == session.textBuffer.getLineLength(session.cursor.y):
+          session.cursor.y + 1
+        else:
+          session.cursor.y
+      )
+      let targetX = (
+        if targetY >= session.textBuffer.lineCount():
+          0
+        elif session.cursor.x == session.textBuffer.getLineLength(session.cursor.y):
+          0
+        else:
+          session.cursor.x + 1
+      )
+      if targetX != session.cursor.x or targetY != session.cursor.y:
+        # if no selection but has shift then create selection
+        if not session.selectionInEffect:
+          session.startSelection(session.cursor.x, session.cursor.y)
+        session.setSelectionLastPoint(targetX.cint, targetY.cint)
+        session.cursor.y = targetY.cint
+        session.cursor.x = targetX.cint
+        session.syncViewPort()
+        shouldRefresh = true
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["S-<right>"],
+    ShiftRightCallback
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["CS-f"],
+    ShiftRightCallback
+  )
+
+  discard globalState.keyMap.registerFKeyCallback(
+    @["C-w"],
+    proc (si: StateInterface): void =
+      let session = si.currentEditSession()
+      if not session.selectionInEffect:
+        discard nil
+      else:
+        let start = min(session.selection.first, session.selection.last)
+        let last = max(session.selection.first, session.selection.last)
+        let data = session.textBuffer.getRange(start, last)
+        session.recordDeleteAction(start, data)
+        discard sdl2.setClipboardText(($data).cstring)
+        session.textBuffer.delete(start, last)
+        session.invalidateSelectedState()
+        session.resetCurrentCursor()
+        session.syncViewPort()
+  )
+
+  discard globalState.keyMap.registerFKeyCallback(
+    @["C-y"],
+    proc (si: StateInterface): void =
+      let session = si.currentEditSession()
+      let s = $getClipboardText()
+      if session.selectionInEffect:
+        let start = min(session.selection.first, session.selection.last)
+        let last = max(session.selection.last, session.selection.first)
+        session.textBuffer.delete(start, last)
+        session.setCursor(start.y, start.x)
+      let l = session.cursor.y
+      let c = session.cursor.x
+      let (dline, dcol) = session.textBuffer.insert(l, c, s)
+      if dline > 0:
+        session.cursor.y += dline.cint
+        session.cursor.x = dcol.cint
+      else:
+        session.cursor.x += dcol.cint
+      session.syncViewPort()
+      shouldRefresh = true
+  )
+  
   while not shouldQuit:
     shouldRefresh = false
     cursorDrawn = false
@@ -260,195 +652,45 @@ proc main(): int =
           let alt = (sdl2.getModState() and KMOD_ALT).bool
           case event.key.keysym.scancode:
             of SDL_SCANCODE_HOME:
-              let targetY = globalState.currentEditSession.cursor.y
-              let targetX = 0
               if shifting:
-                if globalState.currentEditSession.cursor.x != targetX or globalState.currentEditSession.cursor.y != targetY:
-                  if not globalState.currentEditSession.selectionInEffect:
-                    globalState.currentEditSession.startSelection(globalState.currentEditSession.cursor.x, globalState.currentEditSession.cursor.y)
-                  globalState.currentEditSession.setSelectionLastPoint(targetX, targetY)
-                  globalState.currentEditSession.cursor.x = targetX.cint
-                  globalState.currentEditSession.cursor.y = targetY.cint
-                  globalState.currentEditSession.syncViewPort()
-                  shouldRefresh = true
+                discard globalState.keySession.recordAndTryExecute("S-<home>")
               else:
-                if globalState.currentEditSession.selectionInEffect:
-                  globalState.currentEditSession.invalidateSelectedState()
-                  shouldRefresh = true
-                globalState.currentEditSession.gotoLineStart()
+                discard globalState.keySession.recordAndTryExecute("<home>")
             of SDL_SCANCODE_END:
-              let targetY = globalState.currentEditSession.cursor.y
-              let targetX = if targetY >= globalState.currentEditSession.textBuffer.lineCount(): 0 else: globalState.currentEditSession.textBuffer.getLineLength(targetY)
               if shifting:
-                if globalState.currentEditSession.cursor.x != targetX or globalState.currentEditSession.cursor.y != targetY:
-                  if not globalState.currentEditSession.selectionInEffect:
-                    globalState.currentEditSession.startSelection(globalState.currentEditSession.cursor.x, globalState.currentEditSession.cursor.y)
-                  globalState.currentEditSession.setSelectionLastPoint(targetX, targetY)
-                  globalState.currentEditSession.cursor.x = targetX.cint
-                  globalState.currentEditSession.cursor.y = targetY.cint
-                  globalState.currentEditSession.syncViewPort()
-                  shouldRefresh = true
+                discard globalState.keySession.recordAndTryExecute("S-<end>")
               else:
-                if globalState.currentEditSession.selectionInEffect:
-                  globalState.currentEditSession.invalidateSelectedState()
-                  shouldRefresh = true
-                globalState.currentEditSession.gotoLineEnd()
+                discard globalState.keySession.recordAndTryExecute("<end>")
             of SDL_SCANCODE_DELETE:
-              if globalState.currentEditSession.selectionInEffect:
-                let start = min(globalState.currentEditSession.selection.first, globalState.currentEditSession.selection.last)
-                let last = max(globalState.currentEditSession.selection.last, globalState.currentEditSession.selection.first)
-                globalState.currentEditSession.textBuffer.delete(start, last)
-                globalState.currentEditSession.setCursor(start.y, start.x)
-              else:
-                globalState.currentEditSession.textBuffer.deleteChar(globalState.currentEditSession.cursor.y, globalState.currentEditSession.cursor.x)
-              globalState.currentEditSession.invalidateSelectedState()
+              discard globalState.keySession.recordAndTryExecute("<del>")
             of SDL_SCANCODE_BACKSPACE:
-              # When there's selection we delete the selection (and set the cursor
-              # at the start of the selection, which we will save beforehand).
-              if globalState.currentEditSession.selectionInEffect:
-                let start = min(globalState.currentEditSession.selection.first, globalState.currentEditSession.selection.last)
-                let last = max(globalState.currentEditSession.selection.last, globalState.currentEditSession.selection.first)
-                globalState.currentEditSession.textBuffer.delete(start, last)
-                globalState.currentEditSession.setCursor(start.y, start.x)
-              else:
-                # When there's no selection:
-                #   We back up current cursor position for backspacing
-                #   Then we update cursor
-                #   And then we backspace at the saved position
-                # This is written this way because it's easy to consider
-                # text buffer and cursor as two independent thing and
-                # update them separately.
-                # When there's selection we just delete the selection.
-                # NOTE: (lineCount, 0) is treated as the same as (lineCount-1,
-                #   session[lineCount-1].len).
-                var deleteY = globalState.currentEditSession.cursor.y
-                var deleteX = globalState.currentEditSession.cursor.x
-                if deleteY >= globalState.currentEditSession.textBuffer.lineCount():
-                  deleteY -= 1
-                  deleteX = globalState.currentEditSession.textBuffer.getLineLength(deleteY).cint
-                  globalState.currentEditSession.cursor.y -= 1
-                  globalState.currentEditSession.cursor.x = globalState.currentEditSession.textBuffer.getLineLength(deleteY).cint
-                if deleteX == 0:
-                  if deleteY > 0:
-                    globalState.currentEditSession.cursor.y -= 1
-                    globalState.currentEditSession.cursor.x = globalState.currentEditSession.textBuffer.getLineLength(globalState.currentEditSession.cursor.y).cint
-                else:
-                  globalState.currentEditSession.cursor.x -= 1
-                globalState.currentEditSession.textBuffer.backspaceChar(deleteY, deleteX)
-              globalState.currentEditSession.syncViewPort()
-              globalState.currentEditSession.invalidateSelectedState()
+              discard globalState.keySession.recordAndTryExecute("<backspace>")
             of SDL_SCANCODE_UP:
               # note that the behaviour is different between different editors when the
               # cursor is at the top, e.g. emacs doesn't do anything, but gedit (and
               # possibly many other editors) would start a selection from the cursor to
               # the beginning of the line. here we follow the latter.
               if shifting:
-                let targetY = if globalState.currentEditSession.cursor.y > 0: globalState.currentEditSession.cursor.y-1 else: 0
-                let targetX = (
-                  if globalState.currentEditSession.cursor.y > 0:
-                    min(globalState.currentEditSession.cursor.expectingX, globalState.currentEditSession.textBuffer.getLineLength(targetY))
-                  else:
-                    0
-                )
-                if targetX != globalState.currentEditSession.cursor.x or targetY != globalState.currentEditSession.cursor.y:
-                  if not globalState.currentEditSession.selectionInEffect:
-                    globalState.currentEditSession.startSelection(globalState.currentEditSession.cursor.x, globalState.currentEditSession.cursor.y)
-                  globalState.currentEditSession.setSelectionLastPoint(targetX.cint, targetY.cint)
-                  globalState.currentEditSession.cursor.y = targetY.cint
-                  globalState.currentEditSession.cursor.x = targetX.cint
-                  globalState.currentEditSession.syncViewPort()
-                  shouldRefresh = true
+                discard globalState.keySession.recordAndTryExecute("S-<up>")
               else:
-                if globalState.currentEditSession.selectionInEffect:
-                  globalState.currentEditSession.invalidateSelectedState()
-                  shouldRefresh = true
-                globalState.currentEditSession.cursorUp()
-
+                discard globalState.keySession.recordAndTryExecute("<up>")
             of SDL_SCANCODE_DOWN:
-              if not (globalState.currentEditSession.cursor.y > globalState.currentEditSession.textBuffer.lineCount()):
-                if shifting:
-                  let targetY = if globalState.currentEditSession.cursor.y < globalState.currentEditSession.textBuffer.lineCount(): globalState.currentEditSession.cursor.y+1 else: globalState.currentEditSession.textBuffer.lineCount().cint
-                  let targetX = (
-                    if targetY < globalState.currentEditSession.textBuffer.lineCount().cint:
-                      min(globalState.currentEditSession.cursor.expectingX, globalState.currentEditSession.textBuffer.getLineLength(targetY))
-                    else:
-                      0
-                  )
-                  if targetX != globalState.currentEditSession.cursor.x or targetY != globalState.currentEditSession.cursor.y:
-                    if not globalState.currentEditSession.selectionInEffect:
-                      globalState.currentEditSession.startSelection(globalState.currentEditSession.cursor.x, globalState.currentEditSession.cursor.y)
-                    globalState.currentEditSession.setSelectionLastPoint(targetX.cint, targetY.cint)
-                    globalState.currentEditSession.cursor.y = targetY.cint
-                    globalState.currentEditSession.cursor.x = targetX.cint
-                    globalState.currentEditSession.syncViewPort()
-                    shouldRefresh = true
-                else:
-                  if globalState.currentEditSession.selectionInEffect:
-                    globalState.currentEditSession.invalidateSelectedState()
-                    shouldRefresh = true
-                  globalState.currentEditSession.cursorDown()
-
+              if shifting:
+                discard globalState.keySession.recordAndTryExecute("S-<down>")
+              else:
+                discard globalState.keySession.recordAndTryExecute("<down>")
             of SDL_SCANCODE_LEFT:
               if shifting:
-                let targetY = if globalState.currentEditSession.cursor.x > 0: globalState.currentEditSession.cursor.y else: max(globalState.currentEditSession.cursor.y-1, 0)
-                let targetX = (
-                  if globalState.currentEditSession.cursor.x > 0:
-                    (globalState.currentEditSession.cursor.x-1).cint
-                  else:
-                    if globalState.currentEditSession.cursor.y == 0:
-                        0
-                    else:
-                      globalState.currentEditSession.textBuffer.getLineLength(globalState.currentEditSession.cursor.y-1).cint
-                )
-                if targetX != globalState.currentEditSession.cursor.x or targetY != globalState.currentEditSession.cursor.y:
-                  if not globalState.currentEditSession.selectionInEffect:
-                    globalState.currentEditSession.startSelection(globalState.currentEditSession.cursor.x, globalState.currentEditSession.cursor.y)
-                  globalState.currentEditSession.setSelectionLastPoint(targetX.cint, targetY.cint)
-                  globalState.currentEditSession.cursor.y = targetY.cint
-                  globalState.currentEditSession.cursor.x = targetX.cint
-                  globalState.currentEditSession.syncViewPort()
-                  shouldRefresh = true
+                discard globalState.keySession.recordAndTryExecute("S-<left>")
               else:
-                if globalState.currentEditSession.selectionInEffect:
-                  globalState.currentEditSession.invalidateSelectedState()
-                  shouldRefresh = true
-                globalState.currentEditSession.cursorLeft()
-                  
+                discard globalState.keySession.recordAndTryExecute("<left>")
             of SDL_SCANCODE_RIGHT:
               if shifting:
-                let targetY = (
-                  if globalState.currentEditSession.cursor.y >= globalState.currentEditSession.textBuffer.lineCount():
-                    globalState.currentEditSession.textBuffer.lineCount()
-                  elif globalState.currentEditSession.cursor.x == globalState.currentEditSession.textBuffer.getLineLength(globalState.currentEditSession.cursor.y):
-                    globalState.currentEditSession.cursor.y + 1
-                  else:
-                    globalState.currentEditSession.cursor.y
-                )
-                let targetX = (
-                  if targetY >= globalState.currentEditSession.textBuffer.lineCount():
-                    0
-                  elif globalState.currentEditSession.cursor.x == globalState.currentEditSession.textBuffer.getLineLength(globalState.currentEditSession.cursor.y):
-                    0
-                  else:
-                    globalState.currentEditSession.cursor.x + 1
-                )
-                if targetX != globalState.currentEditSession.cursor.x or targetY != globalState.currentEditSession.cursor.y:
-                  # if no selection but has shift then create selection
-                  if not globalState.currentEditSession.selectionInEffect:
-                    globalState.currentEditSession.startSelection(globalState.currentEditSession.cursor.x, globalState.currentEditSession.cursor.y)
-                  globalState.currentEditSession.setSelectionLastPoint(targetX.cint, targetY.cint)
-                  globalState.currentEditSession.cursor.y = targetY.cint
-                  globalState.currentEditSession.cursor.x = targetX.cint
-                  globalState.currentEditSession.syncViewPort()
-                  shouldRefresh = true
+                discard globalState.keySession.recordAndTryExecute("S-<right>")
               else:
-                if not globalState.currentEditSession.selectionInEffect:
-                  globalState.currentEditSession.invalidateSelectedState()
-                  shouldRefresh = true
-                globalState.currentEditSession.cursorRight()
+                discard globalState.keySession.recordAndTryExecute("S-<right>")
 
             else:
-
               let insertX = globalState.currentEditSession.cursor.x
               let insertY = globalState.currentEditSession.cursor.y
               let k = event.key.keysym.scancode.getKeyFromScancode
@@ -460,12 +702,11 @@ proc main(): int =
                 globalState.currentEditSession.syncViewPort()
                 shouldRefresh = true
               else:
-
                 if alt and ctrl:
                   case k:
                     of 's'.ord:
                       # save-as.
-                      discard nil
+                      discard globalState.keySession.recordAndTryExecute("CM-s")
                     of '/'.ord:
                       # redo.
                       globalState.currentEditSession.undoRedoStack.redo(globalState.currentEditSession.textBuffer)
@@ -476,12 +717,7 @@ proc main(): int =
                   case k:
                     of 'w'.ord:
                       # copy.
-                      if globalState.currentEditSession.selectionInEffect:
-                        let start = min(globalState.currentEditSession.selection.first, globalState.currentEditSession.selection.last)
-                        let last = max(globalState.currentEditSession.selection.first, globalState.currentEditSession.selection.last)
-                        let data = globalState.currentEditSession.textBuffer.getRangeString(start, last).cstring
-                        discard sdl2.setClipboardText(data)
-                        globalState.currentEditSession.invalidateSelectedState()
+                      discard globalState.keySession.recordAndTryExecute("M-w")
                     else:
                       discard
 
@@ -492,54 +728,52 @@ proc main(): int =
                       globalState.currentEditSession.undoRedoStack.undo(globalState.currentEditSession.textBuffer)
                     of 'p'.ord:
                       # previous line.
-                      globalState.currentEditSession.cursorUp()
+                      if shifting:
+                        discard globalState.keySession.recordAndTryExecute("CS-p")
+                      else:
+                        discard globalState.keySession.recordAndTryExecute("C-p")
                     of 'n'.ord:
                       # next line.
-                      globalState.currentEditSession.cursorDown()
+                      if shifting:
+                        discard globalState.keySession.recordAndTryExecute("CS-n")
+                      else:
+                        discard globalState.keySession.recordAndTryExecute("C-n")
                     of 'b'.ord:
                       # back 1 char.
-                      globalState.currentEditSession.cursorLeft()
+                      if shifting:
+                        discard globalState.keySession.recordAndTryExecute("CS-b")
+                      else:
+                        discard globalState.keySession.recordAndTryExecute("C-b")
                     of 'f'.ord:
                       # back 1 char.
-                      globalState.currentEditSession.cursorRight()
+                      if shifting:
+                        discard globalState.keySession.recordAndTryExecute("CS-f")
+                      else:
+                        discard globalState.keySession.recordAndTryExecute("C-f")
                     of 'a'.ord:
                       # home.
-                      globalState.currentEditSession.gotoLineStart()
+                      if shifting:
+                        discard globalState.keySession.recordAndTryExecute("CS-a")
+                      else:
+                        discard globalState.keySession.recordAndTryExecute("C-a")
                     of 'e'.ord:
                       # end.
-                      globalState.currentEditSession.gotoLineEnd()
+                      if shifting:
+                        discard globalState.keySession.recordAndTryExecute("CS-e")
+                      else:
+                        discard globalState.keySession.recordAndTryExecute("C-e")
                     of 'w'.ord:
                       # cut
-                      if not globalState.currentEditSession.selectionInEffect:
-                        discard nil
+                      if shifting:
+                        discard globalState.keySession.recordAndTryExecute("CS-w")
                       else:
-                        let start = min(globalState.currentEditSession.selection.first, globalState.currentEditSession.selection.last)
-                        let last = max(globalState.currentEditSession.selection.first, globalState.currentEditSession.selection.last)
-                        let data = globalState.currentEditSession.textBuffer.getRange(start, last)
-                        globalState.currentEditSession.recordDeleteAction(start, data)
-                        discard sdl2.setClipboardText(($data).cstring)
-                        globalState.currentEditSession.textBuffer.delete(start, last)
-                        globalState.currentEditSession.invalidateSelectedState()
-                        globalState.currentEditSession.resetCurrentCursor()
-                        globalState.currentEditSession.syncViewPort()
+                        discard globalState.keySession.recordAndTryExecute("C-w")
                     of 'y'.ord:
                       # paste.
-                      let s = $getClipboardText()
-                      if globalState.currentEditSession.selectionInEffect:
-                        let start = min(globalState.currentEditSession.selection.first, globalState.currentEditSession.selection.last)
-                        let last = max(globalState.currentEditSession.selection.last, globalState.currentEditSession.selection.first)
-                        globalState.currentEditSession.textBuffer.delete(start, last)
-                        globalState.currentEditSession.setCursor(start.y, start.x)
-                      let l = globalState.currentEditSession.cursor.y
-                      let c = globalState.currentEditSession.cursor.x
-                      let (dline, dcol) = globalState.currentEditSession.textBuffer.insert(l, c, s)
-                      if dline > 0:
-                        globalState.currentEditSession.cursor.y += dline.cint
-                        globalState.currentEditSession.cursor.x = dcol.cint
+                      if shifting:
+                        discard globalState.keySession.recordAndTryExecute("CS-y")
                       else:
-                        globalState.currentEditSession.cursor.x += dcol.cint
-                      globalState.currentEditSession.syncViewPort()
-                      shouldRefresh = true
+                        discard globalState.keySession.recordAndTryExecute("C-y")
                     of 's'.ord:
                       # save.
                       discard nil

@@ -20,21 +20,41 @@ type
       nMap*: TableRef[FKeyDescriptor, FKeyMapNode]
   FKeyMap* = ref object
     nMap*: TableRef[FKeyDescriptor, FKeyMapNode]
+  FKeySession* = ref object
+    root*: TableRef[FKeyDescriptor, FKeyMapNode]
+    subject*: FKeyMapNode
+    keyBuffer*: seq[FKeyDescriptor]
+    stateInterface*: StateInterface
 
 proc mkFKeyMap*(): FKeyMap =
   return FKeyMap(
     nMap: newTable[FKeyDescriptor, FKeyMapNode]()
   )
 
+proc mkFKeySession*(fkm: FKeyMap, si: StateInterface): FKeySession =
+  return FKeySession(
+    root: fkm.nMap,
+    subject: nil,
+    keyBuffer: @[],
+    stateInterface: si
+  )
+
+proc mkFKeySession*(): FKeySession =
+  return FKeySession(
+    root: nil,
+    subject: nil,
+    keyBuffer: @[],
+    stateInterface: nil
+  )
+
 # the key descriptor comes in the following format:
 #     [C][M][S]-[key] - Ctrl/Meta/Shift + [key]
 # e.g. Ctrl+s is C-s, Ctrl+Meta+k is CM-k, Ctrl+Meta+Shift+Up is CMS-<up>
-# this might be confusing but there's no .
-#     Ctrl+C is C-c
-#     Ctrl+M is C-M
-#     Meta+C is M-C
-#     Meta+M is M-M
-#     Ctrl+Shift+C is C-C
+#      Ctrl+C is C-c
+#      Ctrl+M is C-m
+#      Meta+C is M-c
+#      Meta+M is M-m
+#      Ctrl+Shift+C is CS-c
 # [key] could be any printable characters that is not white space or:
 #     <up>  - up arrow
 #     <left>  - left arrow
@@ -47,8 +67,10 @@ proc mkFKeyMap*(): FKeyMap =
 #     <ins>   - insert
 #     <f1> ~ <f12>   - F1 ~ F12
 #     <tab>   - tab
-#     <backspc>    - back space
+#     <backspace>    - back space
 #     <esc>   - escape
+#     <del>   - delete
+#     <space>  - space
 
 proc registerFKeyCallback*(fkm: FKeyMap, kseq: seq[FKeyDescriptor], callback: FKeyCallback): bool =
   var i = 0
@@ -89,4 +111,25 @@ proc resolve*(fkmn: FKeyMapNode, kd: FKeyDescriptor): Option[FKeyMapNode] =
 proc resolve*(fkmn: Option[FKeyMapNode], kd: FKeyDescriptor): Option[FKeyMapNode] =
   if fkmn.isNone(): return none(FKeyMapNode)
   return fkmn.get.resolve(kd)
+
+proc clear*(fks: FKeySession): void =
+  fks.subject = nil
+  while fks.keyBuffer.len > 0: discard fks.keyBuffer.pop()
   
+proc recordAndTryExecute*(fks: FKeySession, kd: FKeyDescriptor): Option[bool] =
+  let subj = (if fks.subject.isNil:
+                if fks.root.hasKey(kd): some(fks.root[kd])
+                else: none(FKeyMapNode)
+              else: fks.subject.resolve(kd))
+  if subj.isNone(): return none(bool)
+  let subjval = subj.get()
+  case subjval.kind:
+    of FKEYMAP_CALLBACK:
+      subjval.cValue(fks.stateInterface)
+      while fks.keyBuffer.len > 0: discard fks.keyBuffer.pop()
+      return some(true)
+    of FKEYMAP_SUBMAP:
+      fks.subject = subjval
+      fks.keyBuffer.add(kd)
+      return some(false)
+      
