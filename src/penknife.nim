@@ -53,9 +53,11 @@ proc main(): int =
 
   globalState.keySession.stateInterface = StateInterface(
     currentEditSession: proc (): EditSession = return globalState.currentEditSession,
-    globalStyle: proc(): Style = return globalState.globalStyle
+    globalStyle: proc(): Style = return globalState.globalStyle,
+    keySession: proc(): FKeySession = return globalState.keySession
   )
   globalState.keySession.root = globalState.keyMap.nMap
+  globalState.keySession.globalOverride = globalState.keyMap.globalOverrideMap
 
                                           
 
@@ -276,6 +278,10 @@ proc main(): int =
     UpCallback
   )
   
+  # note that the behaviour is different between different editors when the
+  # cursor is at the top, e.g. emacs doesn't do anything, but gedit (and
+  # possibly many other editors) would start a selection from the cursor to
+  # the beginning of the line. here we follow the latter.
   let ShiftUpCallback = (
     proc (si: StateInterface): void =
       let session = si.currentEditSession()
@@ -358,8 +364,8 @@ proc main(): int =
       let session = si.currentEditSession()
       if session.selectionInEffect:
         session.invalidateSelectedState()
-        shouldRefresh = true
       session.cursorLeft()
+      shouldRefresh = true
   )
   discard globalState.keyMap.registerFKeyCallback(
     @["<left>"],
@@ -405,10 +411,10 @@ proc main(): int =
   let RightCallback = (
     proc (si: StateInterface): void =
       let session = si.currentEditSession()
-      if not session.selectionInEffect:
+      if session.selectionInEffect:
         session.invalidateSelectedState()
-        shouldRefresh = true
       session.cursorRight()
+      shouldRefresh = true
   )
   discard globalState.keyMap.registerFKeyCallback(
     @["<right>"],
@@ -476,6 +482,32 @@ proc main(): int =
   )
 
   discard globalState.keyMap.registerFKeyCallback(
+    @["C-k"],
+    proc (si: StateInterface): void =
+      let session = si.currentEditSession()
+      if session.cursor.y >= session.textBuffer.lineCount(): return
+      let cutStart = session.cursor.x
+      let cutEnd = session.textBuffer.getLineLength(session.cursor.y)
+      session.selection.first.x = cutStart.cint
+      session.selection.first.y = session.cursor.y.cint
+      session.selection.last.x = cutEnd.cint
+      session.selection.last.y = session.cursor.y.cint
+      let start = session.selection.first
+      let last = session.selection.last
+      let data = session.textBuffer.getRange(start, last)
+      discard sdl2.setClipboardText(($data).cstring)
+      session.textBuffer.delete(start, last)
+      session.invalidateSelectedState()
+      session.resetCurrentCursor()
+      session.syncViewPort()
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["C-v", "C-m"],
+    proc (si: StateInterface): void =
+      echo "hello!"
+  )
+
+  discard globalState.keyMap.registerFKeyCallback(
     @["C-y"],
     proc (si: StateInterface): void =
       let session = si.currentEditSession()
@@ -495,6 +527,26 @@ proc main(): int =
         session.cursor.x += dcol.cint
       session.syncViewPort()
       shouldRefresh = true
+  )
+
+  discard globalState.keyMap.registerFKeyCallback(
+    @["C-r"],
+    proc (si: StateInterface): void =
+      shouldReload = true
+      shouldQuit = true
+  )
+  
+  globalState.keyMap.registerGlobalOverrideCallback(
+    "C-q",
+    proc (si: StateInterface): void =
+      si.keySession().cancelCurrentSequence()
+  )
+  
+  discard globalState.keyMap.registerFKeyCallback(
+    @["C-g"],
+    proc (si: StateInterface): void =
+      shouldReload = false
+      shouldQuit = true
   )
   
   while not shouldQuit:
@@ -647,157 +699,63 @@ proc main(): int =
                 shouldRefresh = true
             
         of sdl2.KeyDown:
+          var keyDescriptor = ""
           let shifting = (sdl2.getModState() and KMOD_SHIFT).bool
           let ctrl = (sdl2.getModState() and KMOD_CTRL).bool
           let alt = (sdl2.getModState() and KMOD_ALT).bool
+          if ctrl: keyDescriptor &= "C"
+          if alt: keyDescriptor &= "M"
+          if shifting: keyDescriptor &= "S"
+          if keyDescriptor.len > 0: keyDescriptor &= "-"
           case event.key.keysym.scancode:
-            of SDL_SCANCODE_HOME:
-              if shifting:
-                discard globalState.keySession.recordAndTryExecute("S-<home>")
-              else:
-                discard globalState.keySession.recordAndTryExecute("<home>")
-            of SDL_SCANCODE_END:
-              if shifting:
-                discard globalState.keySession.recordAndTryExecute("S-<end>")
-              else:
-                discard globalState.keySession.recordAndTryExecute("<end>")
-            of SDL_SCANCODE_DELETE:
-              discard globalState.keySession.recordAndTryExecute("<del>")
-            of SDL_SCANCODE_BACKSPACE:
-              discard globalState.keySession.recordAndTryExecute("<backspace>")
-            of SDL_SCANCODE_UP:
-              # note that the behaviour is different between different editors when the
-              # cursor is at the top, e.g. emacs doesn't do anything, but gedit (and
-              # possibly many other editors) would start a selection from the cursor to
-              # the beginning of the line. here we follow the latter.
-              if shifting:
-                discard globalState.keySession.recordAndTryExecute("S-<up>")
-              else:
-                discard globalState.keySession.recordAndTryExecute("<up>")
-            of SDL_SCANCODE_DOWN:
-              if shifting:
-                discard globalState.keySession.recordAndTryExecute("S-<down>")
-              else:
-                discard globalState.keySession.recordAndTryExecute("<down>")
-            of SDL_SCANCODE_LEFT:
-              if shifting:
-                discard globalState.keySession.recordAndTryExecute("S-<left>")
-              else:
-                discard globalState.keySession.recordAndTryExecute("<left>")
-            of SDL_SCANCODE_RIGHT:
-              if shifting:
-                discard globalState.keySession.recordAndTryExecute("S-<right>")
-              else:
-                discard globalState.keySession.recordAndTryExecute("S-<right>")
-
+            of SDL_SCANCODE_HOME: keyDescriptor &= "<home>"
+            of SDL_SCANCODE_END: keyDescriptor &= "<end>"
+            of SDL_SCANCODE_DELETE: keyDescriptor &= "<del>"
+            of SDL_SCANCODE_BACKSPACE: keyDescriptor &= "<backspace>"
+            of SDL_SCANCODE_UP: keyDescriptor &= "<up>"
+            of SDL_SCANCODE_DOWN: keyDescriptor &= "<down>"
+            of SDL_SCANCODE_LEFT: keyDescriptor &= "<left>"
+            of SDL_SCANCODE_RIGHT: keyDescriptor &= "<right>"
+            of SDL_SCANCODE_PAGEUP: keyDescriptor &= "<pgup>"
+            of SDL_SCANCODE_PAGEDOWN: keyDescriptor &= "<pgdn>"
+            of SDL_SCANCODE_F1: keyDescriptor &= "<f1>"
+            of SDL_SCANCODE_F2: keyDescriptor &= "<f2>"
+            of SDL_SCANCODE_F3: keyDescriptor &= "<f3>"
+            of SDL_SCANCODE_F4: keyDescriptor &= "<f4>"
+            of SDL_SCANCODE_F5: keyDescriptor &= "<f5>"
+            of SDL_SCANCODE_F6: keyDescriptor &= "<f6>"
+            of SDL_SCANCODE_F7: keyDescriptor &= "<f7>"
+            of SDL_SCANCODE_F8: keyDescriptor &= "<f8>"
+            of SDL_SCANCODE_F9: keyDescriptor &= "<f9>"
+            of SDL_SCANCODE_F10: keyDescriptor &= "<f10>"
+            of SDL_SCANCODE_F11: keyDescriptor &= "<f11>"
+            of SDL_SCANCODE_F12: keyDescriptor &= "<f12>"
             else:
-              let insertX = globalState.currentEditSession.cursor.x
-              let insertY = globalState.currentEditSession.cursor.y
               let k = event.key.keysym.scancode.getKeyFromScancode
-
               if k == 13 and sdl2.getModState() == KMOD_NONE:
+                keyDescriptor = ""
+                let insertX = globalState.currentEditSession.cursor.x
+                let insertY = globalState.currentEditSession.cursor.y
                 discard globalState.currentEditSession.textBuffer.insert(insertY, insertX, '\n')
                 globalState.currentEditSession.selectionInEffect = false
                 globalState.currentEditSession.setCursor(globalState.currentEditSession.cursor.y + 1, 0)
                 globalState.currentEditSession.syncViewPort()
                 shouldRefresh = true
               else:
-                if alt and ctrl:
-                  case k:
-                    of 's'.ord:
-                      # save-as.
-                      discard globalState.keySession.recordAndTryExecute("CM-s")
-                    of '/'.ord:
-                      # redo.
-                      globalState.currentEditSession.undoRedoStack.redo(globalState.currentEditSession.textBuffer)
-                    else:
-                      discard nil
-                      
-                elif alt and not ctrl:
-                  case k:
-                    of 'w'.ord:
-                      # copy.
-                      discard globalState.keySession.recordAndTryExecute("M-w")
-                    else:
-                      discard
-
-                elif ctrl and not alt:
-                  case k:
-                    of '/'.ord:
-                      # undo.
-                      globalState.currentEditSession.undoRedoStack.undo(globalState.currentEditSession.textBuffer)
-                    of 'p'.ord:
-                      # previous line.
-                      if shifting:
-                        discard globalState.keySession.recordAndTryExecute("CS-p")
-                      else:
-                        discard globalState.keySession.recordAndTryExecute("C-p")
-                    of 'n'.ord:
-                      # next line.
-                      if shifting:
-                        discard globalState.keySession.recordAndTryExecute("CS-n")
-                      else:
-                        discard globalState.keySession.recordAndTryExecute("C-n")
-                    of 'b'.ord:
-                      # back 1 char.
-                      if shifting:
-                        discard globalState.keySession.recordAndTryExecute("CS-b")
-                      else:
-                        discard globalState.keySession.recordAndTryExecute("C-b")
-                    of 'f'.ord:
-                      # back 1 char.
-                      if shifting:
-                        discard globalState.keySession.recordAndTryExecute("CS-f")
-                      else:
-                        discard globalState.keySession.recordAndTryExecute("C-f")
-                    of 'a'.ord:
-                      # home.
-                      if shifting:
-                        discard globalState.keySession.recordAndTryExecute("CS-a")
-                      else:
-                        discard globalState.keySession.recordAndTryExecute("C-a")
-                    of 'e'.ord:
-                      # end.
-                      if shifting:
-                        discard globalState.keySession.recordAndTryExecute("CS-e")
-                      else:
-                        discard globalState.keySession.recordAndTryExecute("C-e")
-                    of 'w'.ord:
-                      # cut
-                      if shifting:
-                        discard globalState.keySession.recordAndTryExecute("CS-w")
-                      else:
-                        discard globalState.keySession.recordAndTryExecute("C-w")
-                    of 'y'.ord:
-                      # paste.
-                      if shifting:
-                        discard globalState.keySession.recordAndTryExecute("CS-y")
-                      else:
-                        discard globalState.keySession.recordAndTryExecute("C-y")
-                    of 's'.ord:
-                      # save.
-                      discard nil
-                    of 'o'.ord:
-                      # open.
-                      discard nil
-                    of 'r'.ord:
-                      # reload.
-                      shouldReload = true
-                      shouldQuit = true
-                      break
-                    of 'g'.ord:
-                      # exit.
-                      shouldReload = false
-                      shouldQuit = true
-                      break
-                    else:
-                      discard nil
-                else:
-                  discard nil
+                case k:
+                  of '\n'.ord: keyDescriptor &= "<return>"
+                  of '\t'.ord: keyDescriptor &= "<tab>"
+                  else:
+                    if k in 0..255 and k.chr in PrintableChars:
+                      keyDescriptor &= k.chr
+          if keyDescriptor.len > 0:
+            discard globalState.keySession.recordAndTryExecute(keyDescriptor)
                         
           shouldRefresh = true
         else:
           discard
+          
+    if shouldQuit: break
 
     # echo $globalState.currentEditSession.undoRedoStack
         

@@ -36,6 +36,9 @@ proc getLine*(tb: TextBuffer, l: int): string =
 proc getLineLength*(tb: TextBuffer, l: int): int =
   return tb.getLineOfRune(l).len
 
+proc getLineByteLength*(tb: TextBuffer, l: int): int =
+  return tb.getLine(l).len
+
 proc isDirty*(tb: TextBuffer): bool =
   return tb.dirty
 
