@@ -49,17 +49,16 @@ proc render*(renderer: RendererPtr, tb: TitleBar): void =
     tb.parentState.globalStyle.highlightColor.b
   )
   renderer.fillRect(tb.dstrect)
-  var titleBarStr = ""
-  titleBarStr &= (if ss.textBuffer.dirty: "[*] " else: "[ ] ")
-  titleBarStr &= ss.textBuffer.name
-  titleBarStr &= " | "
-  titleBarStr &= ss.textBuffer.fullPath
-  if titleBarStr.len <= 0: return
-  discard st.globalStyle.font.renderUTF8Blended(
-    titleBarStr, renderer, nil,
-    tb.dstrect.x, tb.dstrect.y,
-    true
-  )
+  for i in 0..<st.auxEditSession.textBuffer.lineCount():
+    var s = ""
+    # if i == 0: s &= (if st.mainEditSession.textBuffer.dirty: "[*] " else: "[ ] ")
+    s &= st.auxEditSession.textBuffer.getLine(i)
+    discard st.globalStyle.font.renderUTF8Blended(
+      s, renderer, nil,
+      tb.dstrect.x, tb.dstrect.y,
+      true
+    )
+    tb.dstrect.y += st.gridSize.h
   
 proc renderWith*(tb: TitleBar, renderer: RendererPtr): void =
   renderer.render(tb)

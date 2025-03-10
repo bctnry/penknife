@@ -54,7 +54,9 @@ proc main(): int =
   globalState.keySession.stateInterface = StateInterface(
     currentEditSession: proc (): EditSession = return globalState.currentEditSession,
     globalStyle: proc(): Style = return globalState.globalStyle,
-    keySession: proc(): FKeySession = return globalState.keySession
+    keySession: proc(): FKeySession = return globalState.keySession,
+    focusOnAux: proc(): bool = return globalState.focusOnAux,
+    toggleFocus: proc(): void = globalState.focusOnAux = not globalState.focusOnAux
   )
   globalState.keySession.root = globalState.keyMap.nMap
   globalState.keySession.globalOverride = globalState.keyMap.globalOverrideMap
@@ -111,7 +113,8 @@ proc main(): int =
   var selectionInitiationY = 0
   var cursorBlinkTimer = mkInterval((
     proc (): void =
-      cursorView.renderWith(renderer)
+      editorFrame.cursor.renderWith(renderer)
+      editorFrame.auxCursor.renderWith(renderer)
   ), 1000)
   # cursorBlinkTimer.start()
 
@@ -548,6 +551,24 @@ proc main(): int =
       shouldReload = false
       shouldQuit = true
   )
+
+  discard globalState.keyMap.registerFKeyCallback(
+    @["M-<up>"],
+    proc (si: StateInterface): void =
+      if not si.focusOnAux():
+        si.toggleFocus()
+        editorFrame.auxCursor.moveIMEBoxToCursorView()
+        shouldRefresh = true
+  )
+  
+  discard globalState.keyMap.registerFKeyCallback(
+    @["M-<down>"],
+    proc (si: StateInterface): void =
+      if si.focusOnAux():
+        si.toggleFocus()
+        editorFrame.cursor.moveIMEBoxToCursorView()
+        shouldRefresh = true
+  )
   
   while not shouldQuit:
     shouldRefresh = false
@@ -564,6 +585,8 @@ proc main(): int =
           case event.window.event:
             of sdl2.WindowEvent_Resized:
               window.getSize(w, h)
+              globalState.windowWidth = w div gridSize.w
+              globalState.windowHeight = h div gridSize.h
               editorFrame.relayout(0, 0, w div gridSize.w, h div gridSize.h)
               shouldRefresh = true
             of sdl2.WindowEvent_FocusGained:
@@ -773,8 +796,8 @@ proc main(): int =
     editorFrame.render(renderer)
     
     # draw cursor.
-    if cursorBlinkTimer.paused or cursorBlinkTimer.stopped:
-      renderer.render(cursorView, flat=true)
+    renderer.render(editorFrame.cursor, flat=true)
+    renderer.render(editorFrame.auxCursor, flat=true)
     
     renderer.present()
 

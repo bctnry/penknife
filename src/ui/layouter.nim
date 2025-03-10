@@ -40,10 +40,10 @@ proc resize*(ln: var LayoutNode, w: int, h: int): void =
   #   set bottom w = w
   #   set top h += dh/2
   #   set bottom h += dh/2
-  var lnstk: seq[(LayoutNode, w, h)] = @[(ln, w, h)]
+  var lnstk: seq[(LayoutNode, int, int)] = @[(ln, w, h)]
   while lnstk.len > 0:
     var (subj, targetW, targetH) = lnstk.pop()
-    case subj.lnType:
+    case subj.lType:
       of SINGULAR:
         subj.w = targetW
         subj.h = targetH
@@ -54,14 +54,14 @@ proc resize*(ln: var LayoutNode, w: int, h: int): void =
         subj.h = targetH
         if not subj.onResize.isNil: subj.onResize(targetW, targetH)
         lnstk.add((subj.left, subj.left.w + dw div 2, targetH))
-        lnstk.add((subj.right, subj.right.w += dw - dw div 2, targetH))
+        lnstk.add((subj.right, subj.right.w + dw - dw div 2, targetH))
       of HORIZONTAL:
         let dh = subj.h - targetH
         subj.w = targetW
         subj.h = targetH
         if not subj.onResize.isNil: subj.onResize(targetW, targetH)
-        lnstk.add((subj.top, targetW, subj.top.h += dh div 2))
-        lnstk.add((subj.bottom, targetW, subj.bottom.h += dh - dh div 2))
+        lnstk.add((subj.top, targetW, subj.top.h + dh div 2))
+        lnstk.add((subj.bottom, targetW, subj.bottom.h + dh - dh div 2))
 
 proc splitVertical*(ln: var LayoutNode): bool =
   if ln.lType != SINGULAR: return false

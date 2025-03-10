@@ -34,7 +34,7 @@ proc relayout*(lnp: LineNumberPanel, x: cint, y: cint): void =
   
 proc render*(renderer: RendererPtr, lnp: LineNumberPanel): void =
   let st = lnp.parentState
-  let session = st.currentEditSession
+  let session = st.mainEditSession
   let renderRowBound = min(session.viewPort.y+session.viewPort.h, session.textBuffer.lineCount())
   let lnpTargetWidth = (digitCount(renderRowBound) + 1 + VIEWPORT_GAP).cint
   # left border
@@ -53,7 +53,7 @@ proc render*(renderer: RendererPtr, lnp: LineNumberPanel): void =
     lnp.dstrect.y = offsetPY + ((i-session.viewPort.y)*st.gridSize.h).cint
     lnp.dstrect.w = width.cint
     lnp.dstrect.h = st.globalStyle.font.h
-    if st.currentEditSession.cursor.y == i:
+    if session.cursor.y == i:
       renderer.setDrawColor(st.globalStyle.highlightColor.r,
                             st.globalStyle.highlightColor.g,
                             st.globalStyle.highlightColor.b)

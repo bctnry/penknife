@@ -9,6 +9,8 @@ type
     currentEditSession*: proc (): EditSession
     globalStyle*: proc (): Style
     keySession*: proc (): FKeySession
+    focusOnAux*: proc (): bool
+    toggleFocus*: proc (): void
   FKeyCallback* = proc (stateInterface: StateInterface): void
   FKeyMapNodeType* = enum
     FKEYMAP_SUBMAP

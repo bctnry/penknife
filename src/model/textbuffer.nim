@@ -9,12 +9,13 @@ type
     fullPath*: string
     dirty*: bool
     lineList: seq[seq[Rune]]
+    onChange*: proc (): void
 
 proc fromString*(s: string, fp: string = ""): TextBuffer =
   var r: seq[seq[Rune]] = @[]
   for k in s.split("\n"):
     r.add(k.toRunes)
-  return TextBuffer(fullPath: fp, lineList: r)
+  return TextBuffer(fullPath: fp, lineList: r, onChange: nil)
 
 proc toString*(tb: TextBuffer): string =
   var r: seq[string] = @[]
@@ -119,6 +120,7 @@ proc insert*(tb: TextBuffer, l: int, c: int, ch: char): tuple[dline: int, dcol: 
     let rightPart = origText[col..<origText.len]
     tb.lineList[line] = leftPart
     tb.lineList.insert(rightPart, line+1)
+    if not tb.onChange.isNil: tb.onChange()
     return (dline: 1, dcol: 0)
   else:
     if line == tb.lineCount():  # end of document
@@ -126,6 +128,7 @@ proc insert*(tb: TextBuffer, l: int, c: int, ch: char): tuple[dline: int, dcol: 
       # document creates a new line.
       tb.lineList.add("".toRunes)
     tb.lineList[line].insert(ch.Rune, col)
+    if not tb.onChange.isNil: tb.onChange()
     return (dline: 0, dcol: 1)
 
 proc insert*(tb: TextBuffer, l: int, c: int, s: string): tuple[dline: int, dcol: int] =
@@ -135,18 +138,20 @@ proc insert*(tb: TextBuffer, l: int, c: int, s: string): tuple[dline: int, dcol:
     let ll = s.split("\n")
     for k in ll:
       tb.lineList.add(k.toRunes)
+    if not tb.onChange.isNil: tb.onChange()
     return (dline: ll.len, dcol: 0)
   else:
     var theLine = tb.lineList[line]
     var newLines: seq[seq[Rune]] = @[]
     for k in s.split("\n"):
       newLines.add(k.toRunes)
+    var delta: tuple[dline: int, dcol: int]
     case newLines.len:
       of 0:
-        return (dline: 0, dcol: 0)
+        delta = (dline: 0, dcol: 0)
       of 1:
         tb.lineList[line] = theLine[0..<col] & newLines[0] & theLine[col..<theLine.len]
-        return (dline: 0, dcol: newLines[0].len)
+        delta = (dline: 0, dcol: newLines[0].len)
       of 2:
         tb.lineList[line] = theLine[0..<col] & newLines[0]
         if line == tb.lineCount()-1:
@@ -155,7 +160,7 @@ proc insert*(tb: TextBuffer, l: int, c: int, s: string): tuple[dline: int, dcol:
           let oldLine = tb.lineList[line+1]
           tb.lineList[line+1] = newLines[1] & theLine[col..<theLine.len]
           tb.lineList.insert(oldLine, line+2)
-        return (dline: 1, dcol: newLines[1].len)
+        delta = (dline: 1, dcol: newLines[1].len)
       else:
         let dcol = newLines[^1].len
         tb.lineList[line] = theLine[0..<col] & newLines[0]
@@ -169,7 +174,9 @@ proc insert*(tb: TextBuffer, l: int, c: int, s: string): tuple[dline: int, dcol:
           tb.lineList.insert(newLines[1..<newLines.len], line+1)
           # we should be safe when the code for handling case when `newLine.len`
           # is 0 is technically wrong.
-        return (dline: newLines.len-1, dcol: dcol)
+        delta = (dline: newLines.len-1, dcol: dcol)
+    if not tb.onChange.isNil: tb.onChange()
+    return delta
 
 proc insert*(tb: TextBuffer, l: int, c: int, s: seq[Rune]): tuple[dline: int, dcol: int] =
   # TODO: find a better way to do all of this.
@@ -251,6 +258,7 @@ proc backspaceChar*(tb: TextBuffer, l: int, c: int): void =
     tb.lineList[line-1] = tb.lineList[line-1] & ltext
   else:
     tb.lineList[line] = ltext[0..<col-1] & ltext[col..<ltext.len]
+  if not tb.onChange.isNil: tb.onChange()
 
 proc deleteChar*(tb: TextBuffer, l: int, c: int): void =
   tb.dirty = true
@@ -264,6 +272,7 @@ proc deleteChar*(tb: TextBuffer, l: int, c: int): void =
     tb.lineList[line] &= nltext
   else:
     tb.lineList[line] = ltext[0..<col] & ltext[col+1..<ltext.len]
+  if not tb.onChange.isNil: tb.onChange()
   
 proc delete*(tb: TextBuffer, start: Cursor, last: Cursor): void =
   tb.dirty = true
@@ -295,6 +304,7 @@ proc delete*(tb: TextBuffer, start: Cursor, last: Cursor): void =
     else:
       if startLine+1 < lastLine:
         tb.lineList.delete(startLine+1..<lastLine)
+  if not tb.onChange.isNil: tb.onChange()
 
 proc getRange*(tb: TextBuffer, start: Cursor, last: Cursor): seq[Rune] =
   let (startLine, startCol) = tb.resolvePosition(start)

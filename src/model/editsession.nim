@@ -18,6 +18,7 @@ type
     selectionInEffect*: bool
     cursor*: Cursor
     undoRedoStack*: UndoRedoStack
+    onCursorMove*: proc (oldX: cint, oldY: cint): void
 
 proc mkEditSession*(): EditSession =
   return EditSession(
@@ -29,7 +30,8 @@ proc mkEditSession*(): EditSession =
       last: Cursor(x: 0, y: 0, expectingX: 0)
     ),
     selectionInEffect: false,
-    undoRedoStack: mkUndoRedoStack()
+    undoRedoStack: mkUndoRedoStack(),
+    onCursorMove: nil
   )
 
 proc syncViewPort*(st: EditSession): void =
@@ -43,6 +45,8 @@ proc syncViewPort*(st: EditSession): void =
     st.viewPort.y = st.cursor.y - st.viewPort.h + 1
 
 proc cursorLeft*(st: EditSession): void =
+  let oldX = st.cursor.x
+  let oldY = st.cursor.y
   if st.cursor.x > 0:
     st.cursor.x -= 1
     st.cursor.expectingX = st.cursor.x
@@ -58,8 +62,11 @@ proc cursorLeft*(st: EditSession): void =
       st.cursor.y -= 1
     # if no: do nothing
   st.syncViewPort()
+  if not st.onCursorMove.isNil: st.onCursorMove(oldX, oldY)
 
 proc cursorRight*(st: EditSession): void =
+  let oldX = st.cursor.x
+  let oldY = st.cursor.y
   var cursor = st.cursor
   # if at end-of-document
   if cursor.y >= st.textBuffer.lineCount(): return
@@ -79,8 +86,11 @@ proc cursorRight*(st: EditSession): void =
     cursor.x += 1
     cursor.expectingX = cursor.x
   st.syncViewPort()
+  if not st.onCursorMove.isNil: st.onCursorMove(oldX, oldY)
 
 proc cursorUp*(st: EditSession): void =
+  let oldX = st.cursor.x
+  let oldY = st.cursor.y
   var cursor = st.cursor
   # if has prev line
   if cursor.y > 0:
@@ -94,9 +104,12 @@ proc cursorUp*(st: EditSession): void =
     # update cursor y
     cursor.y -= 1
     st.syncViewPort()
+    if not st.onCursorMove.isNil: st.onCursorMove(oldX, oldY)
   # else: do nothing.
 
 proc cursorDown*(st: EditSession): void =
+  let oldX = st.cursor.x
+  let oldY = st.cursor.y
   var cursor = st.cursor
   if cursor.y < st.textBuffer.lineCount():
     # if next line is end-of-document:
@@ -112,14 +125,18 @@ proc cursorDown*(st: EditSession): void =
     # update cursor y
     cursor.y += 1
     st.syncViewPort()
+    if not st.onCursorMove.isNil: st.onCursorMove(oldX, oldY)
 
 proc setCursor*(st: EditSession, line: int, col: int): void =
+  let oldX = st.cursor.x
+  let oldY = st.cursor.y
   var cursor = st.cursor
   cursor.x = col.cint
   cursor.y = line.cint
   st.selection.first.x = col.cint
   st.selection.first.y = line.cint
   st.syncViewPort()
+  if not st.onCursorMove.isNil: st.onCursorMove(oldX, oldY)
 
 proc invalidateSelectedState*(st: EditSession): void =
   st.selectionInEffect = false
@@ -142,9 +159,12 @@ proc relayout*(st: EditSession, gridWidth: cint, gridHeight: cint): void =
   st.viewPort.h = gridHeight
 
 proc resetCurrentCursor*(tb: EditSession): void =
+  let oldX = tb.cursor.x
+  let oldY = tb.cursor.y
   let (line, col) = tb.textBuffer.resolvePosition(tb.cursor)
   tb.cursor.y = line.cint
   tb.cursor.x = col.cint
+  if not tb.onCursorMove.isNil: tb.onCursorMove(oldX, oldY)
 
 proc verticalScroll*(st: EditSession, n: int): void =
   # n positive: up, n negative: down.
@@ -158,14 +178,19 @@ proc horizontalScroll*(st: EditSession, n: int): void =
     st.viewPort.x = newViewPortX.cint
   
 proc gotoLineStart*(st: EditSession): void =
+  let oldX = st.cursor.x
   st.cursor.x = 0
   st.cursor.expectingX = 0
   st.syncViewPort()
+  if not st.onCursorMove.isNil: st.onCursorMove(oldX, st.cursor.y)
+  
 proc gotoLineEnd*(st: EditSession): void =
   if st.cursor.y < st.textBuffer.lineCount():
+    let oldX = st.cursor.x
     st.cursor.x = st.textBuffer.getLineLength(st.cursor.y).cint
     st.cursor.expectingX = st.cursor.x
     st.syncViewPort()
+    if not st.onCursorMove.isNil: st.onCursorMove(oldX, st.cursor.y)
 
 proc undo(tb: TextBuffer, ur: UndoRedoPiece): void =
   case ur.kind:

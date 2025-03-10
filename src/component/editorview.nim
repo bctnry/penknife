@@ -35,7 +35,7 @@ proc relayout*(ev: EditorView, x: cint, y: cint, width: cint, height: cint): voi
   
 proc render*(renderer: RendererPtr, ev: EditorView): void =
   let st = ev.parentState
-  let ss = st.currentEditSession
+  let ss = st.mainEditSession
   let baselineX = (ev.offsetX*st.gridSize.w).cint
   let offsetPY = (ev.offsetY*st.gridSize.h).cint
   # render edit viewport

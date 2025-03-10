@@ -51,7 +51,7 @@ proc loadFont*(file: cstring, size: int): TVFont =
 
 proc determineRuneGridWidth*(f: TVFont, r: Rune): int =
   if f.fontCache.hasKey(r): return if f.fontCache[r].w > f.w: return 2 else: 1
-  if f.auxFontCache.hasKey(r): return if f.fontCache[r].w > f.w: return 2 else: 1
+  if f.auxFontCache.hasKey(r): return if f.auxFontCache[r].w > f.w: return 2 else: 1
   return 0
 
 proc disposeMainColorCache(f: TVFont): void =
