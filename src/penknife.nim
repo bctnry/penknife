@@ -569,12 +569,17 @@ proc main(): int =
         editorFrame.cursor.moveIMEBoxToCursorView()
         shouldRefresh = true
   )
+
+  var firstTime = true
   
   while not shouldQuit:
     shouldRefresh = false
     cursorDrawn = false
 
-    if sdl2.waitEvent(event).bool:
+    if firstTime:
+      firstTime = false
+      shouldRefresh = true
+    elif sdl2.waitEvent(event).bool:
       # handle event here.
       case event.kind:
         of sdl2.QuitEvent:
