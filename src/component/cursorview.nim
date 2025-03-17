@@ -1,6 +1,6 @@
 import std/unicode
 import sdl2
-import ../model/[state, textbuffer, cursor, editsession]
+import ../model/[state, textbuffer, cursor, editsession, style]
 import ../ui/[sdl2_ui_utils, tvfont]
 
 # cursor.

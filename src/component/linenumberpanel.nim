@@ -1,5 +1,5 @@
 import sdl2
-import ../model/[state, textbuffer, cursor]
+import ../model/[state, textbuffer, style]
 import ../ui/[tvfont]
 import ../aux
 

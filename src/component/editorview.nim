@@ -1,5 +1,5 @@
 import sdl2
-import ../model/[state, textbuffer, cursor, editsession]
+import ../model/[state, textbuffer, cursor, editsession, style]
 import ../ui/[tvfont]
 
 # cursor.

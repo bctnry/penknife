@@ -44,10 +44,14 @@ proc main(): int =
     return QuitFailure
 
   # load color according to config
-  globalState.globalStyle.mainColor.loadColorFromString(getGlobalConfig(CONFIG_MAIN_COLOR))
-  globalState.globalStyle.backgroundColor.loadColorFromString(getGlobalConfig(CONFIG_BACKGROUND_COLOR))
-  globalState.globalStyle.auxColor.loadColorFromString(getGlobalConfig(CONFIG_AUX_COLOR))
-  globalState.globalStyle.highlightColor.loadColorFromString(getGlobalConfig(CONFIG_HIGHLIGHT_COLOR))
+  globalState.globalStyle.setColorByString(MAIN_FOREGROUND, getGlobalConfig(CONFIG_KEY_MAIN_FOREGROUND_COLOR))
+  globalState.globalStyle.setColorByString(MAIN_BACKGROUND, getGlobalConfig(CONFIG_KEY_MAIN_BACKGROUND_COLOR))
+  globalState.globalStyle.setColorByString(MAIN_SELECT_FOREGROUND, getGlobalConfig(CONFIG_KEY_MAIN_SELECT_FOREGROUND_COLOR))
+  globalState.globalStyle.setColorByString(MAIN_SELECT_BACKGROUND, getGlobalConfig(CONFIG_KEY_MAIN_SELECT_BACKGROUND_COLOR))
+  globalState.globalStyle.setColorByString(AUX_FOREGROUND, getGlobalConfig(CONFIG_KEY_AUX_FOREGROUND_COLOR))
+  globalState.globalStyle.setColorByString(AUX_BACKGROUND, getGlobalConfig(CONFIG_KEY_AUX_BACKGROUND_COLOR))
+  globalState.globalStyle.setColorByString(AUX_SELECT_FOREGROUND, getGlobalConfig(CONFIG_KEY_AUX_SELECT_FOREGROUND_COLOR))
+  globalState.globalStyle.setColorByString(AUX_SELECT_BACKGROUND, getGlobalConfig(CONFIG_KEY_AUX_SELECT_FOREGROUND_COLOR))
   globalState.globalStyle.font.useNewMainColor(globalState.globalStyle.mainColor)
   globalState.globalStyle.font.useNewAuxColor(globalState.globalStyle.auxColor)
 
