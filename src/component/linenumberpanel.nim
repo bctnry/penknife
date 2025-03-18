@@ -89,7 +89,7 @@ proc render*(renderer: RendererPtr, lnp: LineNumberPanel): void =
     discard st.globalStyle.font.renderUTF8Blended(
       "*", renderer, nil,
       lnRightBorder - 1 * st.gridSize.w,
-      ((lnp.offsetY+(renderRowBound-st.currentEditSession.viewPort.y))*st.gridSize.h).cint,
+      ((lnp.offsetY+(renderRowBound-st.mainEditSession.viewPort.y))*st.gridSize.h).cint,
       st.globalStyle.getColor(MAIN_LINENUMBER_FOREGROUND)
     )
 

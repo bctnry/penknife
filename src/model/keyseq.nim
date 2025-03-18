@@ -1,5 +1,4 @@
 import std/[tables, options]
-import sdl2
 import editsession
 import style
 
@@ -7,6 +6,8 @@ type
   FKeyDescriptor = string
   StateInterface* = ref object
     currentEditSession*: proc (): EditSession
+    mainEditSession*: proc (): EditSession
+    auxEditSession*: proc (): EditSession
     globalStyle*: proc (): Style
     keySession*: proc (): FKeySession
     focusOnAux*: proc (): bool
@@ -94,20 +95,29 @@ proc registerFKeyCallback*(fkm: FKeyMap, kseq: seq[FKeyDescriptor], callback: FK
     let p = kseq[i]
     if not subj.hasKey(p):
       if i == kseq.len-1:
+        # not registered, end of sequence: add as callback
         subj[p] = FKeyMapNode(kind: FKEYMAP_CALLBACK, cValue: callback)
       else:
+        # not registered, not end of sequence: add fmap node
         let newSubmap = newTable[FKeyDescriptor, FKeyMapNode]()
         subj[p] = FKeyMapNode(kind: FKEYMAP_SUBMAP, nMap: newSubmap)
         subj = newSubmap
     elif i == kseq.len-1:
       if subj[p].kind == FKEYMAP_CALLBACK:
+        # registered, end of sequence, callback: replace callback
         subj[p].cValue = callback
       else:
+        # registered, end of sequence, fmap: conflict
         return false
-    else:
+    elif subj[p].kind == FKEYMAP_CALLBACK:
+      # registered, not end of sequence, callback: conflict
+      # resolve by replacing existing callback.
       let newSubmap = newTable[FKeyDescriptor, FKeyMapNode]()
       subj[p] = FKeyMapNode(kind: FKEYMAP_SUBMAP, nMap: newSubmap)
       subj = newSubmap
+    else:
+      # registered, not end of sequence, fmap: next level.
+      subj = subj[p].nMap
     i += 1
   return true
 

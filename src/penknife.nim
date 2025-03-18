@@ -57,6 +57,8 @@ proc main(): int =
 
   globalState.keySession.stateInterface = StateInterface(
     currentEditSession: proc (): EditSession = return globalState.currentEditSession,
+    auxEditSession: proc (): EditSession = return globalState.auxEditSession,
+    mainEditSession: proc (): EditSession = return globalState.mainEditSession,
     globalStyle: proc(): Style = return globalState.globalStyle,
     keySession: proc(): FKeySession = return globalState.keySession,
     focusOnAux: proc(): bool = return globalState.focusOnAux,
@@ -578,6 +580,38 @@ proc main(): int =
         shouldRefresh = true
   )
 
+  discard globalState.keyMap.registerFKeyCallback(
+    @["C-x", "C-s"],
+    proc (si: StateInterface): void =
+      let aux = si.auxEditSession()
+      let main = si.mainEditSession()
+      let titleStr = aux.textBuffer.getLine(0)
+      let ss = titleStr.split('|', maxsplit=1)
+      let filePath = (if ss.len >= 2: ss[1] else: ss[0]).strip()
+      let newName = (if ss.len >= 2: ss[0] else: $filePath.Path.extractFilename())
+      let data = main.textBuffer.toString()
+      main.textBuffer.name = newName
+      let f = open(filePath, fmWrite)
+      f.write(data)
+      f.flushFile()
+      f.close()
+      main.textBuffer.dirty = false
+  )
+
+  discard globalState.keyMap.registerFKeyCallback(
+    @["C-o"],
+    proc (si: StateInterface): void =
+      let aux = si.auxEditSession()
+      let titleStr = aux.textBuffer.getLine(0)
+      let ss = titleStr.split('|', maxsplit=1)
+      let filePath = (if ss.len >= 2: ss[1] else: ss[0]).strip()
+      let newName = $filePath.Path.extractFilename()
+      let f = open(filePath, fmRead)
+      let s = f.readAll()
+      f.close()
+      globalState.loadText(s, name=newName, fullPath=filePath)
+  )
+  
   var firstTime = true
   
   while not shouldQuit:
