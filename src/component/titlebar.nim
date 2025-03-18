@@ -29,6 +29,7 @@ proc relayout*(tb: TitleBar, x: cint, y: cint, w: cint, h: cint): void =
   tb.offsetY = y
   tb.width = w
   tb.height = h
+  tb.parentState.auxEditSession.relayout(w, h)
 
 proc render*(renderer: RendererPtr, tb: TitleBar): void =
   # NOTE: titlebar has the same behaviour as editorview except that:
@@ -48,14 +49,13 @@ proc render*(renderer: RendererPtr, tb: TitleBar): void =
   renderer.fillRect(tb.dstrect)
   let baselineX = (tb.offsetX*st.gridSize.w).cint
   let offsetPY = (tb.offsetY*st.gridSize.h).cint
-  let renderRowBound = min(ss.viewPort.y+tb.height, min(ss.viewPort.y+ss.viewPort.h, ss.textBuffer.lineCount()))
   let selectionRangeStart = min(ss.selection.first, ss.selection.last)
   let selectionRangeEnd = max(ss.selection.first, ss.selection.last)
   for i in 0..<ss.textBuffer.lineCount():
     let line = ss.textBuffer.getLineOfRune(i)
     let renderColBound = min(ss.viewPort.x+ss.viewPort.w, line.len)
     if renderColBound <= ss.viewPort.x:
-      # when: (1) selection is active; (2) row is in selection; (3) row is
+      # when: (1) selection is active; (2) row is in election; (3) row is
       # empty after clipping, we need to display an indicator in the form
       # of a rectangle the size of a single character. this is the behaviour
       # of emacs. we now do the same thing here.
