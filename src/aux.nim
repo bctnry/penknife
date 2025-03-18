@@ -59,7 +59,7 @@ proc isFullWidth*(ch: Rune): bool =
     (RANGE5_BEGIN <=% ch and ch <=% RANGE5_END) or
     (RANGE6_BEGIN <=% ch and ch <=% RANGE6_END)
   )
-  
+
 
 proc digitCount*(x: int): int =
   var m = 10

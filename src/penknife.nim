@@ -9,6 +9,7 @@ import ui/[tvfont, timer]
 import component/[cursorview, editorview, editorframe]
 import config
 import aux
+import interpret_control
 
 const SCREEN_WIDTH: cint = 1280.cint
 const SCREEN_HEIGHT: cint = 768.cint
@@ -562,22 +563,38 @@ proc main(): int =
       shouldQuit = true
   )
 
-  discard globalState.keyMap.registerFKeyCallback(
-    @["M-<up>"],
+  var SwitchToAuxCallback = (
     proc (si: StateInterface): void =
       if not si.focusOnAux():
         si.toggleFocus()
         editorFrame.auxCursor.moveIMEBoxToCursorView()
         shouldRefresh = true
   )
-  
   discard globalState.keyMap.registerFKeyCallback(
-    @["M-<down>"],
+    @["M-<up>"],
+    SwitchToAuxCallback
+  )
+  # TODO: CM-* type fkeys seems to be not registering. fix that and change
+  # the following bindings to CM-p and CM-n.
+  discard globalState.keyMap.registerFKeyCallback(
+    @["CS-p"],
+    SwitchToAuxCallback
+  )
+
+  var SwitchToMainCallback = (
     proc (si: StateInterface): void =
       if si.focusOnAux():
         si.toggleFocus()
         editorFrame.cursor.moveIMEBoxToCursorView()
         shouldRefresh = true
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["M-<down>"],
+    SwitchToMainCallback
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["CS-n"],
+    SwitchToMainCallback
   )
 
   discard globalState.keyMap.registerFKeyCallback(
@@ -611,7 +628,15 @@ proc main(): int =
       f.close()
       globalState.loadText(s, name=newName, fullPath=filePath)
   )
-  
+
+  discard globalState.keyMap.registerFKeyCallback(
+    @["M-x"],
+    proc (si: StateInterface): void =
+      let s = globalState.currentEditSession.getExecutableSource()
+      if s.len <= 0: return
+      ($s).interpretControlCommand(globalState, shouldReload, shouldQuit)
+  )
+      
   var firstTime = true
   
   while not shouldQuit:

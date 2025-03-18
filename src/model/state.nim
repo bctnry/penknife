@@ -43,7 +43,9 @@ proc loadText*(st: State, s: string, name: string = "*unnamed*", fullPath: strin
   st.mainEditSession.textBuffer = s.fromString
   st.mainEditSession.textBuffer.name = name
   st.mainEditSession.textBuffer.fullPath = fullPath
-  st.auxEditSession.textBuffer = (name & " | " & fullPath).fromString
+  var auxString = name & " | " & fullPath  & "\n"
+  auxString &= "Open Save Exit"
+  st.auxEditSession.textBuffer = auxString.fromString
   st.auxEditSession.textBuffer.name = "*aux*"
   st.auxEditSession.textBuffer.fullPath = ""
   

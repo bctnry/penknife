@@ -153,6 +153,25 @@ proc startSelection*(st: EditSession, firstX: int, firstY: int): void =
 proc setSelectionLastPoint*(st: EditSession, lastX: int, lastY: int): void =
   st.selection.last.x = lastX.cint
   st.selection.last.y = lastY.cint
+
+proc getCurrentSelection*(st: EditSession): seq[Rune] =
+  if not st.selectionInEffect: return @[]
+  let start = min(st.selection.first, st.selection.last)
+  let last = max(st.selection.first, st.selection.last)
+  return st.textBuffer.getRange(start, last)
+
+proc getExecutableSource*(st: EditSession): seq[Rune] =
+  if st.selectionInEffect: return st.getCurrentSelection()
+  let y = st.cursor.y
+  let line = st.textBuffer.getLineOfRune(y)
+  if line[st.cursor.x].isWhiteSpace(): return @[]
+  var start = st.cursor.x
+  while start >= 0 and (not line[start].isWhiteSpace()): start -= 1
+  start += 1
+  var last = st.cursor.x
+  while last < line.len and (not line[last].isWhiteSpace()): last += 1
+  last -= 1
+  return line[start..last]
   
 proc relayout*(st: EditSession, gridWidth: cint, gridHeight: cint): void =
   st.viewPort.w = gridWidth
