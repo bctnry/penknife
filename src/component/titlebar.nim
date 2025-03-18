@@ -38,25 +38,21 @@ proc relayout*(tb: TitleBar, x: cint, y: cint, w: cint, h: cint): void =
 
 proc render*(renderer: RendererPtr, tb: TitleBar): void =
   let st = tb.parentState
-  let ss = st.currentEditSession
+  let ss = st.auxEditSession
   tb.dstrect.x = tb.offsetX*st.gridSize.w
   tb.dstrect.y = tb.offsetY*st.gridSize.h
   tb.dstrect.w = tb.width*st.gridSize.w
   tb.dstrect.h = tb.height*st.gridSize.h
-  renderer.setDrawColor(
-    tb.parentState.globalStyle.highlightColor.r,
-    tb.parentState.globalStyle.highlightColor.g,
-    tb.parentState.globalStyle.highlightColor.b
-  )
+  let bgColor = st.globalStyle.getColor(AUX_BACKGROUND)
+  renderer.setDrawColor(bgColor.r, bgColor.g, bgColor.b  )
   renderer.fillRect(tb.dstrect)
-  for i in 0..<st.auxEditSession.textBuffer.lineCount():
+  for i in 0..<ss.textBuffer.lineCount():
     var s = ""
-    # if i == 0: s &= (if st.mainEditSession.textBuffer.dirty: "[*] " else: "[ ] ")
-    s &= st.auxEditSession.textBuffer.getLine(i)
+    s &= ss.textBuffer.getLine(i)
     discard st.globalStyle.font.renderUTF8Blended(
       s, renderer, nil,
       tb.dstrect.x, tb.dstrect.y,
-      true
+      st.globalStyle.getColor(AUX_FOREGROUND)
     )
     tb.dstrect.y += st.gridSize.h
   

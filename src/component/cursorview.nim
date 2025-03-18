@@ -15,6 +15,8 @@ type
     offsetY: cint
     cursorPX: cint
     cursorPY: cint
+    foregroundColor*: sdl2.Color
+    backgroundColor*: sdl2.Color
 
 proc mkCursorView*(st: State): CursorView =
   return CursorView(
@@ -38,20 +40,13 @@ proc render*(renderer: RendererPtr, tb: CursorView, flat: bool = false): void =
   let cursorAGX = ss.textBuffer.canonicalXToGridX(st.globalStyle.font, cursorX, ss.cursor.y)
   let cursorRelativeX = (cursorAGX - viewportAGX).cint
   let cursorRelativeY = (cursorY - ss.viewPort.y).cint
-  let selectionRangeStart = min(ss.selection.first, ss.selection.last)
-  let selectionRangeEnd = max(ss.selection.first, ss.selection.last)
   if cursorRelativeX >= 0 and cursorRelativeY < ss.viewPort.w:
     let baselineX = (tb.offsetX*st.gridSize.w).cint
     let offsetPY = (tb.offsetY*st.gridSize.h).cint
-    var shouldFgColorBeAux = (
-      (flat and not (ss.selectionInEffect and
-                     between(cursorRelativeX, cursorRelativeY, selectionRangeStart, selectionRangeEnd))) or
-      (not flat and not tb.invert)
-    )
-    if st.focusOnAux: shouldFgColorBeAux = not shouldFgColorBeAux
-    let bgcolor = if shouldFgColorBeAux: st.globalStyle.highlightColor
-                  else: st.globalStyle.backgroundColor
-    
+    let fgColor = if flat and tb.invert: tb.backgroundColor
+                  else: tb.foregroundColor
+    let bgcolor = if flat and tb.invert: tb.foregroundColor
+                  else: tb.backgroundColor
     let cursorPX = baselineX+cursorRelativeX*st.gridSize.w
     let cursorPY = offsetPY+cursorRelativeY*st.gridSize.h
     let lineOfRune = if ss.cursor.y >= ss.textBuffer.lineCount(): @[]
@@ -75,7 +70,7 @@ proc render*(renderer: RendererPtr, tb: CursorView, flat: bool = false): void =
          ss.cursor.x < ss.textBuffer.getLineLength(ss.cursor.y):
         discard st.globalStyle.font.renderUTF8Blended(
           $s, renderer, nil,
-          cursorPX.cint, cursorPY.cint, shouldFgColorBeAux
+          cursorPX.cint, cursorPY.cint, fgColor
         )
     if not flat:
       renderer.present()

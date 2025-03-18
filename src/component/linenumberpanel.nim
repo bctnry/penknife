@@ -54,14 +54,16 @@ proc render*(renderer: RendererPtr, lnp: LineNumberPanel): void =
     lnp.dstrect.w = width.cint
     lnp.dstrect.h = st.globalStyle.font.h
     if session.cursor.y == i:
-      renderer.setDrawColor(st.globalStyle.highlightColor.r,
-                            st.globalStyle.highlightColor.g,
-                            st.globalStyle.highlightColor.b)
+      let bgColor = st.globalStyle.getColor(MAIN_LINENUMBER_SELECT_BACKGROUND)
+      renderer.setDrawColor(bgColor.r, bgColor.g, bgColor.b)
       renderer.fillRect(lnp.dstrect)
     discard st.globalStyle.font.renderUTF8Blended(
       lnStr, renderer, nil,
       lnp.dstrect.x, lnp.dstrect.y,
-      session.cursor.y == i
+      st.globalStyle.getColor(
+        if session.cursor.y == i: MAIN_LINENUMBER_SELECT_FOREGROUND
+        else: MAIN_LINENUMBER_FOREGROUND
+      )
     )
     # render selection marker
   if session.selectionInEffect:
@@ -77,7 +79,8 @@ proc render*(renderer: RendererPtr, lnp: LineNumberPanel): void =
           else: "|"
         discard st.globalStyle.font.renderUTF8Blended(
           indicator, renderer, nil,
-          lnRightBorder, lnp.dstrect.y
+          lnRightBorder, lnp.dstrect.y,
+          st.globalStyle.getColor(MAIN_LINENUMBER_FOREGROUND)
         )
   
   # if the current viewport is at a position that can show the end-of-file indicator
@@ -87,7 +90,7 @@ proc render*(renderer: RendererPtr, lnp: LineNumberPanel): void =
       "*", renderer, nil,
       lnRightBorder - 1 * st.gridSize.w,
       ((lnp.offsetY+(renderRowBound-st.currentEditSession.viewPort.y))*st.gridSize.h).cint,
-      false
+      st.globalStyle.getColor(MAIN_LINENUMBER_FOREGROUND)
     )
 
 proc renderWith*(lnp: LineNumberPanel, renderer: RendererPtr): void =

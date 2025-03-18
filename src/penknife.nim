@@ -65,7 +65,6 @@ proc main(): int =
   globalState.keySession.root = globalState.keyMap.nMap
   globalState.keySession.globalOverride = globalState.keyMap.globalOverrideMap
 
-                                          
 
   # create 
   window = sdl2.createWindow("penknife".cstring,
@@ -109,6 +108,11 @@ proc main(): int =
   var cursorView = editorFrame.cursor
   var editorView = editorFrame.editorView
   editorFrame.relayout(0, 0, w div gridSize.w, h div gridSize.h)
+
+  editorFrame.cursor.foregroundColor = globalState.globalStyle.getColor(MAIN_BACKGROUND)
+  editorFrame.cursor.backgroundColor = globalState.globalStyle.getColor(MAIN_FOREGROUND)
+  editorFrame.auxCursor.foregroundColor = globalState.globalStyle.getColor(AUX_BACKGROUND)
+  editorFrame.auxCursor.backgroundColor = globalState.globalStyle.getColor(AUX_FOREGROUND)
 
   var cursorDrawn = false
   var shouldRefresh = false
@@ -544,13 +548,13 @@ proc main(): int =
   )
   
   globalState.keyMap.registerGlobalOverrideCallback(
-    "C-q",
+    "C-g",
     proc (si: StateInterface): void =
       si.keySession().cancelCurrentSequence()
   )
   
   discard globalState.keyMap.registerFKeyCallback(
-    @["C-g"],
+    @["C-x", "C-c"],
     proc (si: StateInterface): void =
       shouldReload = false
       shouldQuit = true
@@ -582,6 +586,10 @@ proc main(): int =
 
     if firstTime:
       firstTime = false
+      window.getSize(w, h)
+      globalState.windowWidth = w div gridSize.w
+      globalState.windowHeight = h div gridSize.h
+      editorFrame.relayout(0, 0, w div gridSize.w, h div gridSize.h)
       shouldRefresh = true
     elif sdl2.waitEvent(event).bool:
       # handle event here.

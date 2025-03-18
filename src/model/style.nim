@@ -22,6 +22,8 @@ type
     MAIN_STRING_FOREGROUND    # for string literals
     MAIN_TYPE_FOREGROUND    # for types
     MAIN_SPECIALID_FOREGROUND    # for identifiers at special positions
+    STATUSBAR_BACKGROUND
+    STATUSBAR_FOREGROUND
 
 proc fallback*(scc: StyleColorClass): StyleColorClass =
   case scc:
@@ -35,6 +37,8 @@ proc fallback*(scc: StyleColorClass): StyleColorClass =
     of MAIN_LINENUMBER_BACKGROUND: MAIN_BACKGROUND
     of MAIN_LINENUMBER_SELECT_FOREGROUND: MAIN_SELECT_FOREGROUND
     of MAIN_LINENUMBER_SELECT_BACKGROUND: MAIN_SELECT_BACKGROUND
+    of STATUSBAR_FOREGROUND: AUX_FOREGROUND
+    of STATUSBAR_BACKGROUND: AUX_BACKGROUND
     else: return scc
 
 type
@@ -93,3 +97,4 @@ proc auxColor*(s: Style): sdl2.Color =
   
 proc highlightColor*(s: Style): sdl2.Color =
   return s.colorDict[AUX_BACKGROUND]
+

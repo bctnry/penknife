@@ -55,9 +55,8 @@ proc render*(renderer: RendererPtr, ev: EditorView): void =
         ev.dstrect.y = offsetPY + ((i-ss.viewPort.y)*st.gridSize.h).cint
         ev.dstrect.w = st.gridSize.w
         ev.dstrect.h = st.gridSize.h
-        renderer.setDrawColor(st.globalStyle.highlightColor.r,
-                              st.globalStyle.highlightColor.g,
-                              st.globalStyle.highlightColor.b)
+        let bgColor: sdl2.Color = st.globalStyle.getColor(MAIN_SELECT_BACKGROUND)
+        renderer.setDrawColor(bgColor.r, bgColor.g, bgColor.b)
         renderer.fillRect(ev.dstrect.addr)
       continue
     let clippedLine = line[ss.viewPort.x..<renderColBound]
@@ -88,13 +87,12 @@ proc render*(renderer: RendererPtr, ev: EditorView): void =
           ev.dstrect.x = (baselineX+leftPartWidth).cint
           ev.dstrect.w = st.globalStyle.font.calculateWidth(middlePart, renderer).cint
           ev.dstrect.h = st.gridSize.h
-          renderer.setDrawColor(st.globalStyle.highlightColor.r,
-                                st.globalStyle.highlightColor.g,
-                                st.globalStyle.highlightColor.b)
+          let bgColor: sdl2.Color = st.globalStyle.getColor(MAIN_SELECT_BACKGROUND)
+          renderer.setDrawColor(bgColor.r, bgColor.g, bgColor.b)
           renderer.fillRect(ev.dstrect)
-        x += st.globalStyle.font.renderUTF8Blended(leftPart, renderer, nil, x, y, false)
-        x += st.globalStyle.font.renderUTF8Blended(middlePart, renderer, nil, x, y, true)
-        x += st.globalStyle.font.renderUTF8Blended(rightPart, renderer, nil, x, y, false)
+        x += st.globalStyle.font.renderUTF8Blended(leftPart, renderer, nil, x, y, st.globalStyle.getColor(MAIN_FOREGROUND))
+        x += st.globalStyle.font.renderUTF8Blended(middlePart, renderer, nil, x, y, st.globalStyle.getColor(MAIN_SELECT_FOREGROUND))
+        x += st.globalStyle.font.renderUTF8Blended(rightPart, renderer, nil, x, y, st.globalStyle.getColor(MAIN_FOREGROUND))
         
       # when the line is the first line or the last line of a multiline selection.
       elif selectionRangeStart.y == i or i == selectionRangeEnd.y and clippedLine.len > 0:
@@ -114,20 +112,25 @@ proc render*(renderer: RendererPtr, ev: EditorView): void =
         ev.dstrect.y = (offsetPY + baselineY).cint
         ev.dstrect.w = (if i == selectionRangeStart.y: rightPartWidth else: leftPartWidth).cint
         ev.dstrect.h = st.gridSize.h
-        renderer.setDrawColor(st.globalStyle.highlightColor.r,
-                              st.globalStyle.highlightColor.g,
-                              st.globalStyle.highlightColor.b)
+        let bgColor: sdl2.Color = st.globalStyle.getColor(MAIN_SELECT_BACKGROUND)
+        renderer.setDrawColor(bgColor.r, bgColor.g, bgColor.b)
         renderer.fillRect(ev.dstrect.addr)
         # draw the parts.
         if leftPartWidth > 0:
           discard st.globalStyle.font.renderUTF8Blended(
             leftPart, renderer, nil, baselineX, ev.dstrect.y,
-            not (i == selectionRangeStart.y)
+            st.globalStyle.getColor(
+              if i == selectionRangeStart.y: MAIN_FOREGROUND
+              else: MAIN_SELECT_FOREGROUND
+            )
           )
         if rightPartWidth > 0:
           discard st.globalStyle.font.renderUTF8Blended(
             rightPart, renderer, nil, (baselineX+leftPartWidth).cint, ev.dstrect.y,
-            i == selectionRangeStart.y
+            st.globalStyle.getColor(
+              if i == selectionRangeStart.y: MAIN_SELECT_FOREGROUND
+              else: MAIN_FOREGROUND
+            )
           )
       elif selectionRangeStart.y < i and i < selectionRangeEnd.y:
         ev.dstrect.x = baselineX
@@ -135,12 +138,12 @@ proc render*(renderer: RendererPtr, ev: EditorView): void =
         ev.dstrect.w = if clippedLine.len() <= 0: st.gridSize.w
                        else: st.globalStyle.font.calculateWidth(clippedLine, renderer).cint
         ev.dstrect.h = st.gridSize.h
-        renderer.setDrawColor(st.globalStyle.highlightColor.r,
-                              st.globalStyle.highlightColor.g,
-                              st.globalStyle.highlightColor.b)
+        let bgColor: sdl2.Color = st.globalStyle.getColor(MAIN_SELECT_BACKGROUND)
+        renderer.setDrawColor(bgColor.r, bgColor.g, bgColor.b)
         renderer.fillRect(ev.dstrect.addr)
         discard st.globalStyle.font.renderUTF8Blended(
-          clippedLine, renderer, nil, baselineX, ev.dstrect.y, true
+          clippedLine, renderer, nil, baselineX, ev.dstrect.y,
+          st.globalStyle.getColor(MAIN_SELECT_FOREGROUND)
         )
 
     if not ss.selectionInEffect or
@@ -149,7 +152,7 @@ proc render*(renderer: RendererPtr, ev: EditorView): void =
       discard st.globalStyle.font.renderUTF8Blended(
         clippedLine, renderer, nil, baselineX,
         offsetPY+((i-ss.viewPort.y)*st.gridSize.h).cint,
-        false
+        st.globalStyle.getColor(MAIN_FOREGROUND)
       )
         
 proc renderWith*(ew: EditorView, renderer: RendererPtr): void =

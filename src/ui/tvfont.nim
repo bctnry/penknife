@@ -13,13 +13,10 @@ type
     raw*: FontPtr
     w*: cint
     h*: cint
-    # the naming is hard for this one.
-    # calling it fg/bg color is wrong, since it's technically "fg color when
-    # not selected" and "fg color when selected".
+    colorList: seq[sdl2.Color]
+    fontCache: TableRef[int, TableRef[Rune, Glyph]]
     mainColor: sdl2.Color
     auxColor: sdl2.Color
-    fontCache: TableRef[Rune, Glyph]
-    auxFontCache: TableRef[Rune, Glyph]
     
 proc loadFont*(f: var TVFont, file: cstring, size: int): bool =
   ##[
@@ -33,8 +30,8 @@ proc loadFont*(f: var TVFont, file: cstring, size: int): bool =
   if font.isNil: return false
   f.raw = font
   discard ttf.sizeUtf8(font, "x".cstring, f.w.addr, f.h.addr)
-  f.fontCache = newTable[Rune, Glyph]()
-  f.auxFontCache = newTable[Rune, Glyph]()
+  f.colorList = @[]
+  f.fontCache = newTable[int, TableRef[Rune, Glyph]]()
   return true
 
 proc loadFont*(file: cstring, size: int): TVFont =
@@ -45,40 +42,73 @@ proc loadFont*(file: cstring, size: int): TVFont =
   width & height of the character `x`. you can see this is truly for
   monospace fonts...
   ]##
-  var res = TVFont(raw: nil, w: 0, h: 0, fontCache: nil, auxFontCache: nil)
+  var res = TVFont(raw: nil, w: 0, h: 0, colorList: @[], fontCache: nil)
   if not res.loadFont(file, size): return nil
   return res
 
+proc `==`(c1: sdl2.Color, c2: sdl2.Color): bool =
+  return (c1.r == c2.r) and (c1.g == c2.g) and (c1.b == c2.b) and (c1.a == c2.a)
+  
+proc registerColor*(f: TVFont, c: sdl2.Color): int =
+  var i = 0
+  while i < f.colorList.len:
+    if f.colorList[i] == c:
+      if not f.fontCache.hasKey(i):
+        f.fontCache[i] = newTable[Rune, Glyph]()
+      return i
+    i += 1
+  var res = f.colorList.len
+  f.colorList.add(c)
+  f.fontCache[res] = newTable[Rune, Glyph]()
+  return res
+
+proc fromHexDigit(x: char): int {.inline.} =
+  if 'a' <= x and x <= 'f': return (x.ord - 'a'.ord + 10)
+  elif 'A' <= x and x <= 'F': return (x.ord - 'A'.ord + 10)
+  elif '0' <= x and x <= '9': return (x.ord - '0'.ord)
+  else: return 0
+
+proc parseColor(x: string): Color =
+  if (not x.len == 7) and (not x.len == 9): return sdl2.color(0, 0, 0, 0)
+  let r = (x[1].fromHexDigit * 16 + x[2].fromHexDigit).uint8
+  let g = (x[3].fromHexDigit * 16 + x[4].fromHexDigit).uint8
+  let b = (x[5].fromHexDigit * 16 + x[6].fromHexDigit).uint8
+  let a = if x.len == 9:
+            (x[7].fromHexDigit * 16 + x[8].fromHexDigit).uint8
+          else:
+            0
+  return sdl2.color(r.cint, g.cint, b.cint, a)
+  
+proc registerColorByString*(f: TVFont, cs: string): int =
+  var c = parseColor(cs)
+  return f.registerColor(c)
+
 proc determineRuneGridWidth*(f: TVFont, r: Rune): int =
-  if f.fontCache.hasKey(r): return if f.fontCache[r].w > f.w: return 2 else: 1
-  if f.auxFontCache.hasKey(r): return if f.auxFontCache[r].w > f.w: return 2 else: 1
+  for k in f.fontCache.keys:
+    let cache = f.fontCache[k]
+    if cache.hasKey(r): return if cache[r].w > f.w: return 2 else: 1
   return 0
 
-proc disposeMainColorCache(f: TVFont): void =
-  if f.fontCache.isNil: return
+proc disposeFontColorCache(f: TVFont): void =
   for k in f.fontCache.keys:
-    f.fontCache[k].raw.destroy()
-  f.fontCache = nil
+    let cache = f.fontCache[k]
+    for kk in cache.keys:
+      cache[kk].raw.destroy()
+    for kk in cache.keys:
+      cache.del(kk)
+  for k in f.fontCache.keys:
+    f.fontCache.del(k)
 
-proc disposeAuxColorCache(f: TVFont): void =
-  if f.auxFontCache.isNil: return
-  for k in f.auxFontCache.keys:
-    f.auxFontCache[k].raw.destroy()
-  f.auxFontCache = nil
+proc useNewMainColor*(f: TVFont, color: sdl2.Color): void =
+  f.mainColor = color
+  discard f.registerColor(color)
 
-proc useNewMainColor*(f: TVFont, fgColor: sdl2.Color): void =
-  f.disposeMainColorCache()
-  f.mainColor = fgColor
-  f.fontCache = newTable[Rune, Glyph]()
-
-proc useNewAuxColor*(f: TVFont, bgColor: sdl2.Color): void =
-  f.disposeAuxColorCache()
-  f.auxColor = bgColor
-  f.auxFontCache = newTable[Rune, Glyph]()
+proc useNewAuxColor*(f: TVFont, color: sdl2.Color): void =
+  f.auxColor = color
+  discard f.registerColor(color)
   
 proc dispose*(f: TVFont): void =
-  f.disposeMainColorCache()
-  f.disposeAuxColorCache()
+  f.disposeFontColorCache()
 
 proc determineBgColor(c: sdl2.Color): sdl2.Color =
   if (c.r == 0 and c.g == 0 and c.b == 0):
@@ -86,46 +116,55 @@ proc determineBgColor(c: sdl2.Color): sdl2.Color =
   else:
     return (r: 0x00, g: 0x00, b: 0x00, a: 0x00)
 
-
-proc refreshCache*(f: TVFont, r: Rune, renderer: RendererPtr, invert: bool = false): void =
-  let fgColor = if invert: f.auxColor else: f.mainColor
-  let fontCache = if invert: f.auxFontCache else: f.fontCache
-  if not fontCache.hasKey(r):
+proc refreshCache*(f: TVFont, renderer: RendererPtr, r: Rune, color: sdl2.Color): void =
+  let colorId = f.registerColor(color)
+  let colorCache = f.fontCache[colorId]
+  if not colorCache.hasKey(r):
     var chSurface = f.raw.renderUTF8BlendedWrapped(
       r.toUTF8().cstring,
-      fgColor,
+      color,
       0
     )
     let w = chSurface.w
     let h = chSurface.h
     let texture = renderer.createTextureFromSurface(chSurface)
     chSurface.freeSurface()
-    fontCache[r] = (raw: texture, w: w, h: h)
+    colorCache[r] = (raw: texture, w: w, h: h)
 
-proc retrieveGlyph*(f: TVFont, r: Rune, aux: bool = false): Glyph =
-  let fc = if aux: f.auxFontCache else: f.fontCache
-  return fc[r]
+proc getFontCache(f: TVFont, color: sdl2.Color): TableRef[Rune, Glyph] {.inline.} =
+  let colorId = f.registerColor(color)
+  return f.fontCache[colorId]
+    
+proc retrieveGlyph*(f: TVFont, r: Rune, color: sdl2.Color): Glyph {.inline.} =
+  return f.getFontCache(color)[r]
 
 proc calculateWidth*(f: TVFont, r: seq[Rune], renderer: RendererPtr): int =
   var res = 0
   for k in r:
-    f.refreshCache(k, renderer)
-    res += f.fontCache[k].w
+    var found = false
+    for cc in f.fontCache.keys:
+      if not f.fontCache[cc].hasKey(k): continue
+      res += f.fontCache[cc][k].w
+      found = true
+      break
+    if not found:
+      f.refreshCache(renderer, k, f.mainColor)
+      res += f.getFontCache(f.mainColor)[k].w
   return res
 proc calculateWidth*(f: TVFont, r: string, renderer: RendererPtr): int =
   return calculateWidth(f, r.toRunes, renderer)
   
 var dstrect: Rect = (x: 0, y: 0, w: 0, h: 0)
-proc renderUTF8Blended*(f: TVFont, s: seq[Rune], renderer: RendererPtr, target: TexturePtr, targetX: cint, targetY: cint, inverted: bool = false): cint =
+proc renderUTF8Blended*(f: TVFont, s: seq[Rune], renderer: RendererPtr, target: TexturePtr, targetX: cint, targetY: cint, color: sdl2.Color): cint =
   var i = 0
-  let fontCache = if inverted: f.auxFontCache else: f.fontCache
+  let fontCache = f.getFontCache(color)
   let oldRenderTarget = renderer.getRenderTarget()
   renderer.setRenderTarget(target)
   dstrect.x = targetX
   dstrect.y = targetY
   while i < s.len:
     let k = s[i]
-    f.refreshCache(k, renderer, inverted)
+    f.refreshCache(renderer, k, color)
     let glyph = fontCache[k]
     dstrect.w = glyph.w
     dstrect.h = glyph.h
@@ -135,21 +174,20 @@ proc renderUTF8Blended*(f: TVFont, s: seq[Rune], renderer: RendererPtr, target: 
   renderer.setRenderTarget(oldRenderTarget)
   return dstrect.x-targetX
   
-proc renderUTF8Blended*(f: TVFont, s: string, renderer: RendererPtr, target: TexturePtr, targetX: cint, targetY: cint, inverted: bool = false): cint =
-  return renderUTF8Blended(f, s.toRunes, renderer, target, targetX, targetY, inverted)
+proc renderUTF8Blended*(f: TVFont, s: string, renderer: RendererPtr, target: TexturePtr, targetX: cint, targetY: cint, color: sdl2.Color): cint {.inline.} =
+  return renderUTF8Blended(f, s.toRunes, renderer, target, targetX, targetY, color)
 
-proc renderUTF8BlendedWrapped*(f: TVFont, s: seq[Rune], renderer: RendererPtr, target: TexturePtr, targetX: cint, targetY: cint, wrapPixelWidth: int = 0, inverted: bool = false): void =
-  let fgColor = if inverted: f.auxColor else: f.mainColor
+proc renderUTF8BlendedWrapped*(f: TVFont, s: seq[Rune], renderer: RendererPtr, target: TexturePtr, targetX: cint, targetY: cint, color: sdl2.Color, wrapPixelWidth: int = 0): void =
   let oldRenderTarget = renderer.getRenderTarget()
   renderer.setRenderTarget(target)
   var i = 0
-  let fontCache = if inverted: f.auxFontCache else: f.fontCache
+  let fontCache = f.getFontCache(color)
   var currentLineW = 0
   dstrect.x = targetX
   dstrect.y = targetY
   while i < s.len:
     let k = s[i]
-    f.refreshCache(k, renderer, inverted)
+    f.refreshCache(renderer, k, color)
     let glyph = fontCache[k]
     let shouldAddNewLine = (s[i] == '\n'.makeRune) or (
       wrapPixelWidth > 0 and (currentLineW + glyph.w > wrapPixelWidth)
@@ -174,6 +212,6 @@ proc renderUTF8BlendedWrapped*(f: TVFont, s: seq[Rune], renderer: RendererPtr, t
     i += 1
   renderer.setRenderTarget(oldRenderTarget)
 
-proc renderUTF8BlendedWrapped*(f: TVFont, s: string, renderer: RendererPtr, target: TexturePtr, targetX: cint, targetY: cint, wrapPixelWidth: int = 0, inverted: bool = false): void =
-  renderUTF8BlendedWrapped(f, s.toRunes, renderer, target, targetX, targetY, wrapPixelWidth, inverted)
+proc renderUTF8BlendedWrapped*(f: TVFont, s: string, renderer: RendererPtr, target: TexturePtr, targetX: cint, targetY: cint, color: sdl2.Color, wrapPixelWidth: int = 0): void {.inline.} =
+  renderUTF8BlendedWrapped(f, s.toRunes, renderer, target, targetX, targetY, color, wrapPixelWidth)
 

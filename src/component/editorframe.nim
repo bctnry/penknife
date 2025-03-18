@@ -2,6 +2,7 @@ import sdl2
 import titlebar
 import editorview
 import cursorview
+import statusbar
 import linenumberpanel
 import ../model/[state, editsession, textbuffer]
 import ../ui/layouter
@@ -15,6 +16,7 @@ type
     editorView*: EditorView
     cursor*: CursorView
     auxCursor*: CursorView
+    statusBar*: StatusBar
     dstrect*: Rect
     focus: bool
     layout*: LayoutNode
@@ -27,6 +29,7 @@ proc mkEditorFrame*(st: State): EditorFrame =
     editorView: mkEditorView(st),
     cursor: mkCursorView(st),
     auxCursor: mkCursorView(st),
+    statusBar: mkStatusBar(st),
     layout: mkLayoutNode(0, 0)
   )
   ef.cursor.residingSession = st.mainEditSession
@@ -36,14 +39,15 @@ proc mkEditorFrame*(st: State): EditorFrame =
     proc (newWidth: int, newHeight: int): void =
       let offsetY = ef.parentState.auxEditSession.textBuffer.lineCount().cint
       ef.titleBar.relayout(0, 0, newWidth.cint, offsetY.cint)
-      ef.lineNumberPanel.relayout(0, offsetY)
+      ef.statusBar.relayout(0, offsetY, newWidth.cint, STATUS_BAR_HEIGHT)
+      ef.lineNumberPanel.relayout(0, (offsetY+STATUS_BAR_HEIGHT).cint)
       let session = st.currentEditSession
       let maxLineNumber = min(session.viewPort.y+session.viewPort.h,
                               session.textBuffer.lineCount())
       let lnpWidth = (digitCount(maxLineNumber) + 1 + VIEWPORT_GAP).cint
-      ef.editorView.relayout(lnpWidth, offsetY, (newWidth-lnpWidth).cint, (newHeight-offsetY).cint)
+      ef.editorView.relayout(lnpWidth, (offsetY+STATUS_BAR_HEIGHT).cint, (newWidth-lnpWidth).cint, (newHeight-offsetY-STATUS_BAR_HEIGHT).cint)
       ef.auxCursor.calibrate(0, 0)
-      ef.cursor.calibrate(lnpWidth, offsetY)
+      ef.cursor.calibrate(lnpWidth, offsetY+STATUS_BAR_HEIGHT)
   )
   let auxSession = st.auxEditSession
   let auxBuffer = auxSession.textBuffer
@@ -67,5 +71,6 @@ proc render*(l: EditorFrame, renderer: RendererPtr): void =
   renderer.render(l.lineNumberPanel)
   renderer.render(l.editorView)
   renderer.render(l.titleBar)
+  renderer.render(l.statusBar)
   
     
