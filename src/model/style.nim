@@ -25,6 +25,29 @@ type
     STATUSBAR_BACKGROUND
     STATUSBAR_FOREGROUND
 
+proc `$`(scc: StyleColorClass): string =
+  case scc:
+    of MAIN_FOREGROUND: "MAIN_FOREGROUND"
+    of MAIN_BACKGROUND: "MAIN_BACKGROUND"
+    of MAIN_SELECT_FOREGROUND: "MAIN_SELECT_FOREGROUND"
+    of MAIN_SELECT_BACKGROUND: "MAIN_SELECT_BACKGROUND"
+    of AUX_FOREGROUND: "AUX_FOREGROUND"
+    of AUX_BACKGROUND: "AUX_BACKGROUND"
+    of AUX_SELECT_FOREGROUND: "AUX_SELECT_FOREGROUND"
+    of AUX_SELECT_BACKGROUND: "AUX_SELECT_BACKGROUND"
+    of MAIN_LINENUMBER_FOREGROUND: "MAIN_LINENUMBER_FOREGROUND"
+    of MAIN_LINENUMBER_BACKGROUND: "MAIN_LINENUMBER_BACKGROUND"
+    of MAIN_LINENUMBER_SELECT_FOREGROUND: "MAIN_LINENUMBER_SELECT_FOREGROUND"
+    of MAIN_LINENUMBER_SELECT_BACKGROUND: "MAIN_LINENUMBER_SELECT_BACKGROUND"
+    of MAIN_COMMENT_FOREGROUND: "MAIN_COMMENT_FOREGROUND"
+    of MAIN_KEYWORD_FOREGROUND: "MAIN_KEYWORD_FOREGROUND"
+    of MAIN_AUXKEYWORD_FOREGROUND: "MAIN_AUXKEYWORD_FOREGROUND"
+    of MAIN_STRING_FOREGROUND: "MAIN_STRING_FOREGROUND"
+    of MAIN_TYPE_FOREGROUND: "MAIN_TYPE_FOREGROUND"
+    of MAIN_SPECIALID_FOREGROUND: "MAIN_SPECIALID_FOREGROUND"
+    of STATUSBAR_BACKGROUND: "STATUSBAR_BACKGROUND"
+    of STATUSBAR_FOREGROUND: "STATUSBAR_FOREGROUND"
+
 proc fallback*(scc: StyleColorClass): StyleColorClass =
   case scc:
     of MAIN_COMMENT_FOREGROUND: MAIN_FOREGROUND
@@ -46,22 +69,10 @@ type
     colorDict*: TableRef[StyleColorClass, sdl2.Color]
     font*: TVFont
 
-proc mkStyle*(
-  mainColor: sdl2.Color = (r: 0x00, g: 0x00, b: 0x00, a: 0x00),
-  backgroundColor: sdl2.Color = (r: 0xe0, g: 0xe0, b: 0xe0, a: 0x00),
-  auxColor: sdl2.Color = (r: 0xff, g: 0xff, b: 0xff, a: 0x00),
-  highlightColor: sdl2.Color = (r: 0x00, g: 0x00, b: 0x00, a: 0x00),
-  font: TVFont = TVFont(raw: nil, w: 0, h: 0)
-): Style =
-    let s = newTable[StyleColorClass, sdl2.Color]()
-    s[MAIN_FOREGROUND] = mainColor
-    s[MAIN_BACKGROUND] = backgroundColor
-    s[MAIN_SELECT_FOREGROUND] = auxColor
-    s[MAIN_SELECT_BACKGROUND] = highlightColor
-    s[AUX_FOREGROUND] = auxColor
-    s[AUX_BACKGROUND] = highlightColor
-    return Style(colorDict: s, font: font)
-    
+proc mkStyle*(): Style =
+  let s = newTable[StyleColorClass, sdl2.Color]()
+  return Style(colorDict: s, font: TVFont(raw: nil, w: 0, h: 0))
+  
 proc getColor*(s: Style, scc: StyleColorClass): sdl2.Color =
   var oldScc = scc
   var newScc = scc
@@ -78,6 +89,7 @@ proc fromHexDigit(x: char): int {.inline.} =
   else: return 0
 
 proc setColorByString*(s: Style, scc: StyleColorClass, cstr: string): void =
+  echo "set color ", scc, " by ", cstr
   if (cstr.len != 7) and (cstr.len != 9) : return
   if not s.colorDict.hasKey(scc): s.colorDict[scc] = sdl2.color(0, 0, 0, 0)
   s.colorDict[scc].r = (cstr[1].fromHexDigit * 16 + cstr[2].fromHexDigit).uint8

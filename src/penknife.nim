@@ -51,7 +51,7 @@ proc main(): int =
   globalState.globalStyle.setColorByString(AUX_FOREGROUND, getGlobalConfig(CONFIG_KEY_AUX_FOREGROUND_COLOR))
   globalState.globalStyle.setColorByString(AUX_BACKGROUND, getGlobalConfig(CONFIG_KEY_AUX_BACKGROUND_COLOR))
   globalState.globalStyle.setColorByString(AUX_SELECT_FOREGROUND, getGlobalConfig(CONFIG_KEY_AUX_SELECT_FOREGROUND_COLOR))
-  globalState.globalStyle.setColorByString(AUX_SELECT_BACKGROUND, getGlobalConfig(CONFIG_KEY_AUX_SELECT_FOREGROUND_COLOR))
+  globalState.globalStyle.setColorByString(AUX_SELECT_BACKGROUND, getGlobalConfig(CONFIG_KEY_AUX_SELECT_BACKGROUND_COLOR))
   globalState.globalStyle.font.useNewMainColor(globalState.globalStyle.mainColor)
   globalState.globalStyle.font.useNewAuxColor(globalState.globalStyle.auxColor)
 
