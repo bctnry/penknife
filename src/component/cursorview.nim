@@ -40,7 +40,7 @@ proc render*(renderer: RendererPtr, tb: CursorView, flat: bool = false): void =
   let cursorAGX = ss.textBuffer.canonicalXToGridX(st.globalStyle.font, cursorX, ss.cursor.y)
   let cursorRelativeX = (cursorAGX - viewportAGX).cint
   let cursorRelativeY = (cursorY - ss.viewPort.y).cint
-  if cursorRelativeX >= 0 and cursorRelativeY < ss.viewPort.w:
+  if cursorRelativeX >= 0 and cursorRelativeY >= 0 and cursorRelativeY < ss.viewPort.w:
     let baselineX = (tb.offsetX*st.gridSize.w).cint
     let offsetPY = (tb.offsetY*st.gridSize.h).cint
     let fgColor = if flat and tb.invert: tb.backgroundColor
