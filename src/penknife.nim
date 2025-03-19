@@ -574,10 +574,8 @@ proc main(): int =
     @["M-<up>"],
     SwitchToAuxCallback
   )
-  # TODO: CM-* type fkeys seems to be not registering. fix that and change
-  # the following bindings to CM-p and CM-n.
   discard globalState.keyMap.registerFKeyCallback(
-    @["CS-p"],
+    @["CM-i"],
     SwitchToAuxCallback
   )
 
@@ -593,7 +591,7 @@ proc main(): int =
     SwitchToMainCallback
   )
   discard globalState.keyMap.registerFKeyCallback(
-    @["CS-n"],
+    @["CM-k"],
     SwitchToMainCallback
   )
 
