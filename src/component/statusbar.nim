@@ -44,10 +44,10 @@ proc render*(renderer: RendererPtr, tb: StatusBar): void =
   s &= (if st.focusOnAux: "^" else: "v")
   s &= " "
   if st.mainEditSession.selectionInEffect:
-    s &= "(" & $st.mainEditSession.selection.first.x & "," &
-               $st.mainEditSession.selection.first.y & ")-(" &
-               $st.mainEditSession.selection.last.x & "," &
-               $st.mainEditSession.selection.last.y & ")"
+    s &= "(" & $st.mainEditSession.selection.first.y & "," &
+               $st.mainEditSession.selection.first.x & ")-(" &
+               $st.mainEditSession.selection.last.y & "," &
+               $st.mainEditSession.selection.last.x & ")"
   else:
     s &= $st.mainEditSession.cursor
   s &= " " & st.keySession.keyBuffer.join(" ")
