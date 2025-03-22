@@ -422,6 +422,86 @@ proc main(): int =
     ShiftLeftCallback
   )
 
+  let ControlLeftCallback = (
+    # NOTE: this is hacky. change this in the future.
+    proc (si: StateInterface): void =
+      let session = si.currentEditSession()
+      var y = session.cursor.y
+      var x = session.cursor.x
+      while true:
+        x -= 1
+        let (newLine, newCol) = session.textBuffer.resolvePosition(y, x)
+        y = newLine.cint
+        x = newCol.cint
+        if x == 0: break
+        if not session.textBuffer.getLineOfRune(y)[x].isWhiteSpace(): break
+      while true:
+        x -= 1
+        var (newLine, newCol) = session.textBuffer.resolvePosition(y, x)
+        y = newLine.cint
+        x = newCol.cint
+        if x == 0: break
+        if session.textBuffer.getLineOfRune(y)[x].isWhiteSpace():
+          let (newLine, newCol) = session.textBuffer.resolvePosition(y, x+1)
+          y = newLine.cint
+          x = newCol.cint
+          break
+      session.setCursor(y, x)
+      session.cursor.expectingX = x
+      if session.selectionInEffect: session.invalidateSelectedState()
+      shouldRefresh = true
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["C-<left>"],
+    ControlLeftCallback
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["M-b"],
+    ControlLeftCallback
+  )
+  
+  let ShiftControlLeftCallback = (
+    # NOTE: this is hacky. change this in the future.
+    proc (si: StateInterface): void =
+      let session = si.currentEditSession()
+      var y = session.cursor.y
+      var x = session.cursor.x
+      while true:
+        x -= 1
+        let (newLine, newCol) = session.textBuffer.resolvePosition(y, x)
+        y = newLine.cint
+        x = newCol.cint
+        if x == 0: break
+        if not session.textBuffer.getLineOfRune(y)[x].isWhiteSpace(): break
+      while true:
+        x -= 1
+        var (newLine, newCol) = session.textBuffer.resolvePosition(y, x)
+        y = newLine.cint
+        x = newCol.cint
+        if x == 0: break
+        if session.textBuffer.getLineOfRune(y)[x].isWhiteSpace():
+          let (newLine, newCol) = session.textBuffer.resolvePosition(y, x+1)
+          y = newLine.cint
+          x = newCol.cint
+          break
+      if x != session.cursor.x or y != session.cursor.y:
+        if not session.selectionInEffect:
+          session.startSelection(session.cursor.x, session.cursor.y)
+        session.setSelectionLastPoint(x, y)
+        session.cursor.x = x
+        session.cursor.y = y
+        session.syncViewPort()
+        shouldRefresh = true
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["CS-<left>"],
+    ShiftControlLeftCallback
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["MS-b"],
+    ShiftControlLeftCallback
+  )
+
   let RightCallback = (
     proc (si: StateInterface): void =
       let session = si.currentEditSession()
@@ -476,7 +556,189 @@ proc main(): int =
     @["CS-f"],
     ShiftRightCallback
   )
+  
+  let ControlRightCallback = (
+    # NOTE: this is hacky. change this in the future.
+    proc (si: StateInterface): void =
+      let session = si.currentEditSession()
+      var y = session.cursor.y
+      var x = session.cursor.x
+      while true:
+        x += 1
+        let (newLine, newCol) = session.textBuffer.resolvePosition(y, x)
+        y = newLine.cint
+        x = newCol.cint
+        if y == session.textBuffer.lineCount(): break
+        let l = session.textBuffer.getLineOfRune(y)
+        if x == l.len() or (not l[x].isWhiteSpace()): break
+      while true:
+        x += 1
+        var (newLine, newCol) = session.textBuffer.resolvePosition(y, x)
+        y = newLine.cint
+        x = newCol.cint
+        if y == session.textBuffer.lineCount(): break
+        let l = session.textBuffer.getLineOfRune(y)
+        if x == l.len() or l[x].isWhiteSpace():
+          let (newLine, newCol) = session.textBuffer.resolvePosition(y, x)
+          y = newLine.cint
+          x = newCol.cint
+          break
+      session.setCursor(y, x)
+      session.cursor.expectingX = x
+      if session.selectionInEffect: session.invalidateSelectedState()
+      shouldRefresh = true
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["C-<right>"],
+    ControlRightCallback
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["M-f"],
+    ControlRightCallback
+  )
 
+  let ShiftControlRightCallback = (
+    # NOTE: this is hacky. change this in the future.
+    proc (si: StateInterface): void =
+      let session = si.currentEditSession()
+      var y = session.cursor.y
+      var x = session.cursor.x
+      while true:
+        x += 1
+        let (newLine, newCol) = session.textBuffer.resolvePosition(y, x)
+        y = newLine.cint
+        x = newCol.cint
+        if y == session.textBuffer.lineCount(): break
+        let l = session.textBuffer.getLineOfRune(y)
+        if x == l.len() or (not l[x].isWhiteSpace()): break
+      while true:
+        x += 1
+        var (newLine, newCol) = session.textBuffer.resolvePosition(y, x)
+        y = newLine.cint
+        x = newCol.cint
+        if y == session.textBuffer.lineCount(): break
+        let l = session.textBuffer.getLineOfRune(y)
+        if x == l.len() or l[x].isWhiteSpace():
+          let (newLine, newCol) = session.textBuffer.resolvePosition(y, x)
+          y = newLine.cint
+          x = newCol.cint
+          break
+      if x != session.cursor.x or y != session.cursor.y:
+        # if no selection but has shift then create selection
+        if not session.selectionInEffect:
+          session.startSelection(session.cursor.x, session.cursor.y)
+        session.setSelectionLastPoint(x.cint, y.cint)
+        session.cursor.y = y.cint
+        session.cursor.x = x.cint
+        session.syncViewPort()
+        shouldRefresh = true
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["CS-<right>"],
+    ShiftControlRightCallback
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["MS-f"],
+    ShiftControlRightCallback
+  )
+
+  let ControlUpCallback = (
+    proc (si: StateInterface): void =
+      let session = si.currentEditSession()
+      var y = session.cursor.y
+      var x = session.cursor.x
+      if y == session.textBuffer.lineCount(): y -= 1
+      while y > 0:
+        y -= 1
+        if session.textBuffer.getLine(y).strip() == "": break
+      x = 0
+      let (line, col) = session.textBuffer.resolvePosition(y, x)
+      session.setCursor(line, col)
+      session.syncViewPort()
+      session.cursor.expectingX = 0
+      if session.selectionInEffect: session.invalidateSelectedState()
+      shouldRefresh = true
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["C-<up>"],
+    ControlUpCallback
+  )
+
+  let ShiftControlUpCallback = (
+    proc (si: StateInterface): void =
+      let session = si.currentEditSession()
+      var y = session.cursor.y
+      var x = session.cursor.x
+      if y == session.textBuffer.lineCount(): y -= 1
+      while y > 0:
+        y -= 1
+        if session.textBuffer.getLine(y).strip() == "": break
+      x = 0
+      let (line, col) = session.textBuffer.resolvePosition(y, x)
+      if line != session.cursor.x or col != session.cursor.y:
+        # if no selection but has shift then create selection
+        if not session.selectionInEffect:
+          session.startSelection(session.cursor.x, session.cursor.y)
+        session.setSelectionLastPoint(col.cint, line.cint)
+        session.cursor.y = line.cint
+        session.cursor.x = col.cint
+        session.syncViewPort()
+        shouldRefresh = true
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["CS-<up>"],
+    ShiftControlUpCallback
+  )
+
+  let ControlDownCallback = (
+    proc (si: StateInterface): void =
+      let session = si.currentEditSession()
+      var y = session.cursor.y
+      var x = session.cursor.x
+      while y < session.textBuffer.lineCount():
+        y += 1
+        if y == session.textBuffer.lineCount() or
+           session.textBuffer.getLine(y).strip() == "": break
+      x = 0
+      let (line, col) = session.textBuffer.resolvePosition(y, x)
+      session.setCursor(line, col)
+      session.syncViewPort()
+      session.cursor.expectingX = 0
+      if session.selectionInEffect: session.invalidateSelectedState()
+      shouldRefresh = true
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["C-<down>"],
+    ControlDownCallback
+  )
+
+  let ShiftControlDownCallback = (
+    proc (si: StateInterface): void =
+      let session = si.currentEditSession()
+      var y = session.cursor.y
+      var x = session.cursor.x
+      while y < session.textBuffer.lineCount():
+        y += 1
+        if y == session.textBuffer.lineCount() or
+           session.textBuffer.getLine(y).strip() == "": break
+      x = 0
+      let (line, col) = session.textBuffer.resolvePosition(y, x)
+      if line != session.cursor.x or col != session.cursor.y:
+        # if no selection but has shift then create selection
+        if not session.selectionInEffect:
+          session.startSelection(session.cursor.x, session.cursor.y)
+        session.setSelectionLastPoint(col.cint, line.cint)
+        session.cursor.y = line.cint
+        session.cursor.x = col.cint
+        session.syncViewPort()
+        shouldRefresh = true
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["CS-<down>"],
+    ShiftControlDownCallback
+  )        
+      
+  
   discard globalState.keyMap.registerFKeyCallback(
     @["C-w"],
     proc (si: StateInterface): void =

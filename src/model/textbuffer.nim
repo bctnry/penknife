@@ -198,7 +198,10 @@ proc resolvePosition*(tb: TextBuffer, line: int, col: int): tuple[line: int, col
   var targetLine = line
   var targetCol = col
   if line < 0: return (line: 0, col: 0)
-  if line >= tb.lineCount(): return (line: tb.lineCount(), col: 0)
+  if line >= tb.lineCount():
+    let newLine = line - 1
+    let newCol = tb.getLineLength(newLine) + col
+    return tb.resolvePosition(newLine, newCol)
   if col < 0:
     targetLine -= 1
     if targetLine < 0: return (line: 0, col: 0)
