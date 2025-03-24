@@ -13,6 +13,42 @@ import interpret_control
 const SCREEN_WIDTH: cint = 1280.cint
 const SCREEN_HEIGHT: cint = 768.cint
 
+
+# NOTE: this is here because sdl2 library in nim has a few questionable choices.
+{.push warning[user]: off}
+when defined(SDL_Static):
+  static: echo "SDL_Static option is deprecated and will soon be removed. Instead please use --dynlibOverride:SDL2."
+
+else:
+  when defined(windows):
+    const LibName* = "SDL2.dll"
+  elif defined(macosx):
+    const LibName* = "libSDL2.dylib"
+  elif defined(openbsd):
+    const LibName* = "libSDL2.so.0.6"
+  elif defined(haiku):
+    const LibName* = "libSDL2-2.0.so.0"
+  else:
+    const LibName* = "libSDL2(|-2.0).so(|.0)"
+{.pop.}
+{.push callConv: cdecl, dynlib: LibName.}
+proc waitEventTimeoutPtr*(event: ptr Event, timeout: cint): Bool32 {.importc: "SDL_WaitEventTimeout".}
+  ## Waits indefinitely for the next available event.
+  ## This is to use with `nil`, so that you can wait for an event to arrive
+  ## without removing it from the event queue.
+{.pop.}
+proc timestamp(x: ptr sdl2.Event): uint32 =
+  let s = cast[UserEventPtr](x)
+  return s.timestamp
+proc isMouseEvent(x: sdl2.Event): bool =
+  case x.kind:
+    of sdl2.MouseButtonDown: return true
+    of sdl2.MouseButtonUp: return true
+    of sdl2.MouseMotion: return true
+    of sdl2.MouseWheel: return true
+    else: return false
+
+
 proc logError(x: string): void =
   stderr.writeLine(x)
 
@@ -926,6 +962,8 @@ proc main(): int =
   )
       
   var firstTime = true
+  var ditherTimer = getTicks()
+  var lastEventHandled = true
   
   while not shouldQuit:
     shouldRefresh = false
@@ -938,7 +976,20 @@ proc main(): int =
       globalState.windowHeight = h div gridSize.h
       editorFrame.relayout(0, 0, w div gridSize.w, h div gridSize.h)
       shouldRefresh = true
-    elif sdl2.waitEvent(event).bool:
+    else:
+      let waitRes = waitEventTimeoutPtr(nil, 10)
+      if not waitRes.bool:
+        if lastEventHandled: continue
+        lastEventHandled = true
+      else:
+        discard waitEvent(event)
+        if event.isMouseEvent:
+          let thisTimestamp = timestamp(event.addr)
+          if thisTimestamp - ditherTimer < 50:
+            lastEventHandled = false
+            continue
+          else:
+            ditherTimer = thisTimestamp
       # handle event here.
       case event.kind:
         of sdl2.QuitEvent:
@@ -1240,11 +1291,13 @@ proc main(): int =
         else:
           discard
           
+    lastEventHandled = true
     if shouldQuit: break
 
     # echo $globalState.currentEditSession.undoRedoStack
         
     cursorBlinkTimer.check()
+    
     if not shouldRefresh: continue
 
     # echo "re-render"
@@ -1262,6 +1315,7 @@ proc main(): int =
     renderer.render(editorFrame.auxCursor, flat=true)
     
     renderer.present()
+    
 
   renderer.destroy()
   window.destroyWindow()
