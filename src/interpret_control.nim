@@ -1,6 +1,6 @@
 import std/strutils
 import std/paths
-import model/[editsession, state, keyseq, textbuffer]
+import model/[editsession, state, textbuffer]
 
 # penknife control language.
 #
@@ -23,7 +23,8 @@ proc isNumber(s: string): bool =
 
 proc interpretControlCommand*(s: string, st: State, shouldReload: var bool, shouldQuit: var bool): void =
   if s.isNumber:
-    st.mainEditSession.setCursor(s.parseInt, st.mainEditSession.cursor.x)
+    let (line, col) = st.mainEditSession.textBuffer.resolvePosition(s.parseInt, st.mainEditSession.cursor.x)
+    st.mainEditSession.setCursor(line, col)
   elif s == "Open":
     let aux = st.auxEditSession
     let titleStr = aux.textBuffer.getLine(0)
@@ -51,6 +52,23 @@ proc interpretControlCommand*(s: string, st: State, shouldReload: var bool, shou
   elif s == "Exit":
     shouldReload = false
     shouldQuit = true
+  else:
+    let trimmed = s.strip()
+    if trimmed.endsWith("+"):
+      let parg = trimmed[0..<trimmed.len()-1]
+      if parg.isNumber:
+        let currentLine = st.mainEditSession.cursor.y
+        let offsetY = parg.parseInt
+        let (line, col) = st.mainEditSession.textBuffer.resolvePosition(currentLine+offsetY, st.mainEditSession.cursor.x)
+        st.mainEditSession.setCursor(line, col)
+      elif trimmed.endsWith("-"):
+        let parg = trimmed[0..<trimmed.len()-1]
+        if parg.isNumber:
+          let currentLine = st.mainEditSession.cursor.y
+          let offsetY = parg.parseInt
+          let (line, col) = st.mainEditSession.textBuffer.resolvePosition(currentLine-offsetY, st.mainEditSession.cursor.x)
+          st.mainEditSession.setCursor(line, col)
+          
   
   discard
   

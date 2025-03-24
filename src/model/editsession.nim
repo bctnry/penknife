@@ -236,17 +236,17 @@ proc undo*(stk: UndoRedoStack, tb: TextBuffer): void =
   stk.i -= 1
 
 proc redo*(stk: UndoRedoStack, tb: TextBuffer): void =
-  if stk.i < 0: return
-  let p = stk.pieces[stk.i]
+  if stk.i >= stk.pieces.len-1: return
+  let p = stk.pieces[stk.i+1]
   tb.redo(p)
-  stk.i -= 1
+  stk.i += 1
     
 proc recordInsertAction*(es: EditSession, position: Cursor, data: seq[Rune]): void =
   let stk = es.undoRedoStack
   if stk.i < stk.pieces.len-1:
     for _ in 0..<stk.pieces.len-1 - stk.i:
       discard stk.pieces.pop()
-  stk.pieces.add(UndoRedoPiece(kind: UR_INSERT, postPosition: position, data: data))
+  stk.pieces.add(UndoRedoPiece(kind: UR_INSERT, postPosition: position.clone(), data: data))
   stk.i = stk.pieces.len-1
 
 proc recordDeleteAction*(es: EditSession, position: Cursor, data: seq[Rune]): void =
@@ -254,7 +254,7 @@ proc recordDeleteAction*(es: EditSession, position: Cursor, data: seq[Rune]): vo
   if stk.i < stk.pieces.len-1:
     for _ in 0..<stk.pieces.len-1 - stk.i:
       discard stk.pieces.pop()
-  stk.pieces.add(UndoRedoPiece(kind: UR_DELETE, postPosition: position, data: data))
+  stk.pieces.add(UndoRedoPiece(kind: UR_DELETE, postPosition: position.clone(), data: data))
   stk.i = stk.pieces.len-1
   
     

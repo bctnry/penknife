@@ -1,6 +1,5 @@
 import std/unicode
 import cursor
-import textbuffer
 
 type
   # I don't have a better name for this for now.

@@ -4,11 +4,10 @@ import std/paths
 import std/unicode
 import sdl2
 import sdl2/ttf
-import model/[textbuffer, editsession, state, cursor, undoredo, keyseq, style]
+import model/[textbuffer, editsession, state, cursor, keyseq, style]
 import ui/[tvfont, timer]
 import component/[cursorview, editorview, editorframe]
 import config
-import aux
 import interpret_control
 
 const SCREEN_WIDTH: cint = 1280.cint
@@ -122,6 +121,7 @@ proc main(): int =
   var selectionInitiated = false
   var selectionInitiationX = 0
   var selectionInitiationY = 0
+  var selectionStartedAtAux = false
   var cursorBlinkTimer = mkInterval((
     proc (): void =
       editorFrame.cursor.renderWith(renderer)
@@ -738,9 +738,8 @@ proc main(): int =
     ShiftControlDownCallback
   )        
       
-  
-  discard globalState.keyMap.registerFKeyCallback(
-    @["C-w"],
+
+  let CutCallback = (
     proc (si: StateInterface): void =
       let session = si.currentEditSession()
       if not session.selectionInEffect:
@@ -756,9 +755,33 @@ proc main(): int =
         session.resetCurrentCursor()
         session.syncViewPort()
   )
-
   discard globalState.keyMap.registerFKeyCallback(
-    @["C-k"],
+    @["C-w"],
+    CutCallback
+  )
+
+  let UndoCallback = (
+    proc (si: StateInterface): void =
+      let session = si.currentEditSession()
+      session.undoRedoStack.undo(session.textBuffer)
+      discard
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["C-/"],
+    UndoCallback
+  )
+  let RedoCallback = (
+    proc (si: StateInterface): void =
+      let session = si.currentEditSession()
+      session.undoRedoStack.redo(session.textBuffer)
+      discard
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["CM-/"],
+    RedoCallback
+  )
+
+  let CutToLineEndCallback = (
     proc (si: StateInterface): void =
       let session = si.currentEditSession()
       if session.cursor.y >= session.textBuffer.lineCount(): return
@@ -771,11 +794,16 @@ proc main(): int =
       let start = session.selection.first
       let last = session.selection.last
       let data = session.textBuffer.getRange(start, last)
+      session.recordDeleteAction(start, data)
       discard sdl2.setClipboardText(($data).cstring)
       session.textBuffer.delete(start, last)
       session.invalidateSelectedState()
       session.resetCurrentCursor()
       session.syncViewPort()
+  )
+  discard globalState.keyMap.registerFKeyCallback(
+    @["C-k"],
+    CutToLineEndCallback
   )
   discard globalState.keyMap.registerFKeyCallback(
     @["C-v", "C-m"],
@@ -837,7 +865,7 @@ proc main(): int =
     SwitchToAuxCallback
   )
   discard globalState.keyMap.registerFKeyCallback(
-    @["CM-i"],
+    @["M-p"],
     SwitchToAuxCallback
   )
 
@@ -853,7 +881,7 @@ proc main(): int =
     SwitchToMainCallback
   )
   discard globalState.keyMap.registerFKeyCallback(
-    @["CM-k"],
+    @["M-n"],
     SwitchToMainCallback
   )
 
@@ -980,80 +1008,178 @@ proc main(): int =
           shouldRefresh = true
           
         of sdl2.MouseButtonDown:
-          globalState.currentEditSession.invalidateSelectedState()
+          # globalState.currentEditSession.invalidateSelectedState()
+          shouldRefresh = true
           if sdl2.getModState().cint == sdl2.KMOD_NONE.cint:
-            let relativeGridY = event.button.y div gridSize.h
-            let line = max(0,
-                           min(globalState.currentEditSession.viewPort.y + relativeGridY,
-                               globalState.currentEditSession.textBuffer.lineCount()) - editorView.offsetY
-            )
-            var x = 0
-            if line < globalState.currentEditSession.textBuffer.lineCount():
-              let relativeGridX = (event.button.x div gridSize.w) - editorView.offsetX
-              let baseGridX = session.textBuffer.canonicalXToGridX(globalState.globalStyle.font,
-                                                        globalState.currentEditSession.viewPort.x, line)
-              let absoluteGridX = max(0, baseGridX + relativeGridX)
-              let absoluteCanonicalX = session.textBuffer.gridXToCanonicalX(globalState.globalStyle.font,
-                                                                 absoluteGridX,
-                                                                 line)
-              x = max(0, min(globalState.currentEditSession.textBuffer.getLineLength(line), absoluteCanonicalX))
-            let y = line
-            x = min(x, globalState.currentEditSession.textBuffer.getLineOfRune(y).len)
-            globalState.currentEditSession.setCursor(y, x)
-            globalState.currentEditSession.cursor.expectingX = x.cint
-            globalState.currentEditSession.syncViewPort()
-            selectionInitiated = true
-            selectionInitiationX = x
-            selectionInitiationY = y
-            globalState.currentEditSession.selection.first.x = x.cint
-            globalState.currentEditSession.selection.first.y = y.cint
-            shouldRefresh = true
+            selectionInitiated = false
+            var relativeGridX: cint = event.button.x div gridSize.w
+            var relativeGridY: cint = event.button.y div gridSize.h
+            var line: cint
+            var col: cint
+            let auxHeight = globalState.auxEditSession.textBuffer.lineCount()
+            if relativeGridY == auxHeight:
+              # NOTE: this would be the situation when the user clicked the statup
+              # bar, which currently does nothing.
+              discard
+            else:
+              if relativeGridY < auxHeight:
+                globalState.focusOnAux = true
+                editorFrame.auxCursor.moveIMEBoxToCursorView()
+                line = max(0, relativeGridY)
+
+                # note that viewport contains canonical position & thus requires converting.
+                let baseGridX = globalState.auxEditSession.textBuffer.canonicalXToGridX(
+                  globalState.globalStyle.font,
+                  globalState.auxEditSession.viewPort.x, line)
+                let absoluteGridX = max(0, baseGridX + relativeGridX)
+                let absoluteCanonX = globalState.auxEditSession.textBuffer.gridXToCanonicalX(
+                  globalState.globalStyle.font,
+                  absoluteGridX,
+                  line)
+                col = if line == auxHeight: 0
+                      else: max(0, min(globalState.auxEditSession.textBuffer.getLineLength(line), absoluteCanonX)).cint
+                selectionStartedAtAux = true
+                globalState.auxEditSession.invalidateSelectedState()
+              elif relativeGridY > auxHeight:
+                globalState.focusOnAux = false
+                editorFrame.cursor.moveIMEBoxToCursorView()
+                relativeGridY -= (auxHeight + 1).cint
+                line = max(0,
+                           min(globalState.mainEditSession.viewPort.y + relativeGridY,
+                               globalState.mainEditSession.textBuffer.lineCount())).cint
+                relativeGridX -= editorFrame.editorView.offsetX
+                
+                # note that viewport contains canonical position & thus requires converting.
+                let baseGridX = globalState.mainEditSession.textBuffer.canonicalXToGridX(
+                  globalState.globalStyle.font,
+                  globalState.mainEditSession.viewPort.x, line)
+                let absoluteGridX = max(0, baseGridX + relativeGridX)
+                let absoluteCanonX = globalState.mainEditSession.textBuffer.gridXToCanonicalX(
+                  globalState.globalStyle.font,
+                  absoluteGridX,
+                  line)
+                col = if line == globalState.mainEditSession.textBuffer.lineCount(): 0
+                      else: max(0, min(globalState.mainEditSession.textBuffer.getLineLength(line), absoluteCanonX)).cint
+                selectionStartedAtAux = false
+                globalState.mainEditSession.invalidateSelectedState()
+              globalState.currentEditSession.setCursor(line, col)
+              globalState.currentEditSession.cursor.expectingX = col
+              globalState.currentEditSession.syncViewPort()
+              selectionInitiated = true
+              selectionInitiationX = col
+              selectionInitiationY = line
+              globalState.currentEditSession.selection.first.x = col
+              globalState.currentEditSession.selection.first.y = line
+              shouldRefresh = true
 
         of sdl2.MouseButtonUp:
-          let relativeGridY = event.button.y div gridSize.h
-          let y = max(0, min(globalState.currentEditSession.viewPort.y + relativeGridY, globalState.currentEditSession.textBuffer.lineCount()) - editorView.offsetY)
-          var x = 0
-          if y < globalState.currentEditSession.textBuffer.lineCount():
-            let relativeGridX = (event.button.x div gridSize.w) - editorView.offsetX
-            let baseGridX = session.textBuffer.canonicalXToGridX(globalState.globalStyle.font,
-                                                                 globalState.currentEditSession.viewPort.x, y)
-            let absoluteGridX = max(0, baseGridX + relativeGridX)
-            let absoluteCanonicalX = session.textBuffer.gridXToCanonicalX(globalState.globalStyle.font,
-                                                                          absoluteGridX,
-                                                                          y)
-            x = max(0, min(globalState.currentEditSession.textBuffer.getLineLength(y), absoluteCanonicalX))
-          x = min(x, globalState.currentEditSession.textBuffer.getLineOfRune(y).len)
-          if selectionInitiated:
-            if globalState.currentEditSession.selection.first.x != x or globalState.currentEditSession.selection.first.y != y:
-              globalState.currentEditSession.selectionInEffect = true
-            selectionInitiated = false
+          if sdl2.getModState().cint == sdl2.KMOD_NONE.cint:
+            var relativeGridX = event.button.x div gridSize.w
+            var relativeGridY = event.button.y div gridSize.h
+            var line: cint
+            var col: cint
+            let auxHeight = globalState.auxEditSession.textBuffer.lineCount().cint
+            if relativeGridY == auxHeight:
+              # NOTE: this would be the situation when the user clicked the statup
+              # bar, which currently does nothing.
+              discard
+            else:
+              if relativeGridY < auxHeight:
+                globalState.focusOnAux = true
+                editorFrame.auxCursor.moveIMEBoxToCursorView()
+                line = max(0, relativeGridY)
+                let baseGridX = globalState.auxEditSession.textBuffer.canonicalXToGridX(
+                  globalState.globalStyle.font,
+                  globalState.auxEditSession.viewPort.x, line)
+                let absoluteGridX = max(0, baseGridX + relativeGridX)
+                let absoluteCanonX = globalState.auxEditSession.textBuffer.gridXToCanonicalX(
+                  globalState.globalStyle.font,
+                  absoluteGridX,
+                  line)
+                col = if line == auxHeight: 0
+                      else: max(0, min(globalState.auxEditSession.textBuffer.getLineLength(line), absoluteCanonX)).cint
+                if selectionInitiated and selectionStartedAtAux and (
+                  globalState.auxEditSession.selection.first.x != col or
+                  globalState.auxEditSession.selection.first.y != line
+                ):
+                  globalState.auxEditSession.selectionInEffect = true
+              elif relativeGridY > auxHeight:
+                globalState.focusOnAux = false
+                editorFrame.cursor.moveIMEBoxToCursorView()
+                relativeGridY -= (auxHeight + 1).cint
+                line = max(0,
+                           min(globalState.mainEditSession.viewPort.y + relativeGridY,
+                               globalState.mainEditSession.textBuffer.lineCount())).cint
+                relativeGridX -= editorFrame.editorView.offsetX
+                
+                # note that viewport contains canonical position & thus requires converting.
+                let baseGridX = globalState.mainEditSession.textBuffer.canonicalXToGridX(
+                  globalState.globalStyle.font,
+                  globalState.mainEditSession.viewPort.x, line)
+                let absoluteGridX = max(0, baseGridX + relativeGridX)
+                let absoluteCanonX = globalState.mainEditSession.textBuffer.gridXToCanonicalX(
+                  globalState.globalStyle.font,
+                  absoluteGridX,
+                  line)
+                col = if line == globalState.mainEditSession.textBuffer.lineCount(): 0
+                      else: max(0, min(globalState.mainEditSession.textBuffer.getLineLength(line), absoluteCanonX)).cint
+                if selectionInitiated and not selectionStartedAtAux and (
+                  globalState.mainEditSession.selection.first.x != col or
+                  globalState.mainEditSession.selection.first.y != line
+                ):
+                  globalState.mainEditSession.selectionInEffect = true
+          selectionInitiated = false
             
         of sdl2.MouseMotion:
           if sdl2.getModState() == KMOD_NONE:
             if not (event.motion.xrel == 0 and event.motion.yrel == 0):
               if (event.motion.state == BUTTON_LEFT).bool:
-                let relativeGridY = event.motion.y div gridSize.h
-                let line = max(0,
-                               min(globalState.currentEditSession.viewPort.y + relativeGridY,
-                                   globalState.currentEditSession.textBuffer.lineCount()) - editorView.offsetY
-                )
-                var x = 0
-                if line < globalState.currentEditSession.textBuffer.lineCount():
-                  let relativeGridX = (event.motion.x div gridSize.w) - editorView.offsetX
-                  let baseGridX = session.textBuffer.canonicalXToGridX(globalState.globalStyle.font,
-                                                            globalState.currentEditSession.viewPort.x, line)
+                var relativeGridX = event.motion.x div gridSize.w
+                var relativeGridY = event.motion.y div gridSize.h
+                var line: cint
+                var col: cint
+                let auxHeight = globalState.auxEditSession.textBuffer.lineCount().cint
+                if selectionStartedAtAux:
+                  globalState.focusOnAux = true
+                  editorFrame.auxCursor.moveIMEBoxToCursorView()
+                  line = max(0, relativeGridY)
+
+                  # note that viewport contains canonical position & thus requires converting.
+                  let baseGridX = globalState.auxEditSession.textBuffer.canonicalXToGridX(
+                    globalState.globalStyle.font,
+                    globalState.auxEditSession.viewPort.x, line)
                   let absoluteGridX = max(0, baseGridX + relativeGridX)
-                  let absoluteCanonicalX = session.textBuffer.gridXToCanonicalX(globalState.globalStyle.font,
-                                                                     absoluteGridX,
-                                                                     line)
-                  x = max(0, min(globalState.currentEditSession.textBuffer.getLineLength(line), absoluteCanonicalX))
-                let y = line
-                x = min(x, globalState.currentEditSession.textBuffer.getLineOfRune(y).len)
+                  let absoluteCanonX = globalState.auxEditSession.textBuffer.gridXToCanonicalX(
+                    globalState.globalStyle.font,
+                    absoluteGridX,
+                    line)
+                  col = if line == auxHeight: 0
+                        else: max(0, min(globalState.auxEditSession.textBuffer.getLineLength(line), absoluteCanonX)).cint
+                else:
+                  globalState.focusOnAux = false
+                  editorFrame.cursor.moveIMEBoxToCursorView()
+                  relativeGridY -= (auxHeight + 1).cint
+                  line = max(0,
+                             min(globalState.mainEditSession.viewPort.y + relativeGridY,
+                                 globalState.mainEditSession.textBuffer.lineCount())).cint
+                  relativeGridX -= editorFrame.editorView.offsetX
+                  
+                  # note that viewport contains canonical position & thus requires converting.
+                  let baseGridX = globalState.mainEditSession.textBuffer.canonicalXToGridX(
+                    globalState.globalStyle.font,
+                    globalState.mainEditSession.viewPort.x, line)
+                  let absoluteGridX = max(0, baseGridX + relativeGridX)
+                  let absoluteCanonX = globalState.mainEditSession.textBuffer.gridXToCanonicalX(
+                    globalState.globalStyle.font,
+                    absoluteGridX,
+                    line)
+                  col = if line == globalState.mainEditSession.textBuffer.lineCount(): 0
+                        else: max(0, min(globalState.mainEditSession.textBuffer.getLineLength(line), absoluteCanonX)).cint
                 if selectionInitiated:
                   globalState.currentEditSession.selectionInEffect = true
-                  globalState.currentEditSession.setSelectionLastPoint(x, y)
-                  globalState.currentEditSession.cursor.x = x.cint
-                  globalState.currentEditSession.cursor.y = y.cint
+                  globalState.currentEditSession.setSelectionLastPoint(col, line)
+                  globalState.currentEditSession.cursor.x = col
+                  globalState.currentEditSession.cursor.y = line
                   globalState.currentEditSession.syncViewPort()
                 shouldRefresh = true
             

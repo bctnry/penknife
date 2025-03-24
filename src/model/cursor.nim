@@ -61,3 +61,6 @@ proc advanceWith*(c: Cursor, r: seq[Rune]): Cursor =
       col += 1
   return Cursor(x: col, y: line, expectingX: col)
   
+proc clone*(c: Cursor): Cursor =
+  return Cursor(x: c.x, y: c.y, expectingX: c.expectingX)
+  
